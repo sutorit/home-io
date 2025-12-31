@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brightness Control</title>
+    <style>
+        /* Modal base */
+        .slider-modal {
+            display: flex;
+            /* for demo, show always */
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+
+        .slider-content {
+            background: #7cccf131;
+            padding: 25px;
+            border-radius: 20px;
+            text-align: center;
+            color: white;
+            width: 340px;
+            position: relative;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        /* Close button */
+        .close-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: transparent;
+            border: none;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+        }
+
+        /* Slider wrapper with icons */
+        .slider-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* Modern slider */
+        #slider {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 30px;
+            /* slightly thicker for better alignment */
+            border-radius: 50px;
+            outline: none;
+            cursor: pointer;
+
+            /* Base background (empty track color) */
+            background: #333;
+
+            /* Dynamic fill overlay */
+            background-image: linear-gradient(to right, #ffd900, #fcdd2f, #ffe866);
+            background-repeat: no-repeat;
+            background-size: var(--fill, 50%) 100%;
+
+            transition: background-size 0.1s linear;
+        }
+
+        /* WebKit Thumb (Chrome, Edge, Safari) */
+        #slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 0;
+            height: 0;
+            background: transparent;
+            border: none;
+            box-shadow: none;
+        }
+
+        /* Firefox Thumb */
+        #slider::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            background: #FFD700;
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+
+            /* Glow effect */
+            box-shadow:
+                0 0 6px rgba(255, 215, 0, 0.9),
+                0 0 12px rgba(255, 217, 0, 0.63),
+                0 0 20px rgba(255, 224, 50, 0.445);
+        }
+
+
+        /* Value text */
+        #brightness-value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #FFD700;
+            margin-top: 12px;
+        }
+
+        /* Icons */
+        .icon {
+            font-size: 18px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="brightness-modal" class="slider-modal">
+        <div class="slider-content">
+            <button class="close-btn" onclick="closeModal()">✖</button>
+            <h3 id="modal-title">Brightness</h3>
+
+            <!-- Thin modern slider with icons -->
+            <div class="slider-wrapper">
+                <span class="icon">🔅</span>
+                <input type="range" id="slider" min="0" max="100" />
+                <span class="icon">🔆</span>
+            </div>
+
+            <div id="brightness-value">%</div>
+        </div>
+    </div>
+
+    <script>
+        const slider = document.getElementById("slider");
+        const value = document.getElementById("brightness-value");
+
+        function updateSlider() {
+            let val = slider.value;
+            let min = slider.min ? slider.min : 0;
+            let max = slider.max ? slider.max : 100;
+            let percent = ((val - min) / (max - min)) * 100;
+
+            value.textContent = val + "%";
+
+            // Fill track dynamically
+            slider.style.setProperty("--fill", percent + "%");
+        }
+
+        slider.addEventListener("input", updateSlider);
+        updateSlider();
+
+        function closeModal() {
+            document.getElementById("brightness-modal").style.display = "none";
+        }
+    </script>
+</body>
+
+</html>

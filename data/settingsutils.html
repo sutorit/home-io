@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SUTORIT SETTINGS</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <header>
+        <button class="settings-btn" onclick="window.location.href='/settings.html'">
+            <svg viewBox="0 0 24 24">
+                <path
+                    d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7zm8.94-2.06l1.43 1.43a1 1 0 0 1 0 1.41l-1.52 1.52a1 1 0 0 1-1.41 0l-1.43-1.43a7.04 7.04 0 0 1-1.63.95l-.25 2.04a1 1 0 0 1-1 .87h-2.15a1 1 0 0 1-1-.87l-.25-2.04a7.04 7.04 0 0 1-1.63-.95l-1.43 1.43a1 1 0 0 1-1.41 0l-1.52-1.52a1 1 0 0 1 0-1.41l1.43-1.43a7.04 7.04 0 0 1-.95-1.63l-2.04-.25a1 1 0 0 1-.87-1V9.06a1 1 0 0 1 .87-1l2.04-.25a7.04 7.04 0 0 1 .95-1.63L4.1 4.75a1 1 0 0 1 0-1.41L5.62 1.82a1 1 0 0 1 1.41 0l1.43 1.43c.51-.34 1.05-.64 1.63-.95l.25-2.04a1 1 0 0 1 1-.87h2.15a1 1 0 0 1 1 .87l.25 2.04c.58.31 1.12.61 1.63.95l1.43-1.43a1 1 0 0 1 1.41 0l1.52 1.52a1 1 0 0 1 0 1.41l-1.43 1.43c.34.51.64 1.05.95 1.63l2.04.25a1 1 0 0 1 .87 1v2.15a1 1 0 0 1-.87 1l-2.04.25c-.31.58-.61 1.12-.95 1.63z" />
+            </svg>
+        </button>
+
+        <div class="title">MORE SETTINGS</div>
+
+        <div class="logo-container">
+            <img src="sutorit.png" alt="Logo">
+        </div>
+    </header>
+
+    <main class="content">
+        <div class="config_container">
+            <div class="config-section">
+                <!-- Theme Section -->
+                <h2>Theme</h2>
+                <label class="theme-switch" for="theme-toggle-checkbox">
+                    <input type="checkbox" id="theme-toggle-checkbox">
+                    <span class="slider">
+                        <span class="icon sun"></span>
+                        <span class="icon moon"></span>
+                    </span>
+                </label>
+                <p>Toggle between Light and Dark modes.</p>
+            </div>
+            <!-- Update Section -->
+            <div class="config-section">
+                <h2>UPDATE</h2>
+                <button class="update-btn" onclick="checkForUpdate()">
+                    Check for Updates
+                </button>
+
+                <p>Check for firmware updates.</p>
+            </div>
+            <!-- Logout Section -->
+            <div class="config-section">
+                <h2>LOGOUT</h2>
+                <button class="logout-btn" onclick="logout()">Logout</button>
+                <p>Click to logout from the current session.</p>
+            </div>
+
+
+        </div>
+        <div id="popup" class="popup-overlay">
+
+            <!-- Confirmation box -->
+            <div class="popup-box" id="confirmBox">
+                <h3 id="popup-message">Are you sure?</h3>
+                <div class="popup-actions">
+                    <button class="popup-btn yes-btn" onclick="confirmAction()">Yes</button>
+                    <button class="popup-btn no-btn" onclick="closePopup()">No</button>
+                </div>
+            </div>
+    </main>
+    <script>
+        const checkbox = document.getElementById('theme-toggle-checkbox');
+        const body = document.body;
+
+        // Apply saved theme on load
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedTheme = localStorage.getItem('theme') || 'dark';
+
+            if (savedTheme === 'dark') {
+                body.classList.remove('light-mode'); // ensure dark
+                checkbox.checked = true;             // checked means dark
+            } else {
+                body.classList.add('light-mode');    // enable light
+                checkbox.checked = false;
+            }
+        });
+
+        // Toggle theme
+        checkbox.addEventListener('change', () => {
+            if (checkbox.checked) {
+                // Dark mode
+                body.classList.remove('light-mode');
+                localStorage.setItem('theme', 'dark');
+            } else {
+                // Light mode
+                body.classList.add('light-mode');
+                localStorage.setItem('theme', 'light');
+            }
+        });
+
+    </script>
+    <script>
+        let pendingAction = null;
+
+        function logout() {
+            pendingAction = 'logout';
+            showPopup('Are you sure you want to logout?');
+        }
+
+        function showPopup(message) {
+            document.getElementById('popup-message').innerText = message;
+            document.getElementById('popup').style.display = 'flex';
+        }
+
+        function closePopup() {
+            document.getElementById('popup').style.display = 'none';
+            pendingAction = null;
+        }
+
+        function confirmAction() {
+            if (pendingAction === 'logout') {
+                window.location.href = '/logout'; // Redirect to logout endpoint
+            }
+            closePopup();
+        }
+
+
+        function checkForUpdate() {
+            if (!confirm("Check and install firmware update?")) return;
+
+            fetch("/checkUpdate")
+                .then(res => res.text())
+                .then(msg => {
+                    alert(msg);
+                })
+                .catch(err => {
+                    alert("Update failed: " + err);
+                });
+        }
+
+
+    </script>
+</body>
+
+</html>

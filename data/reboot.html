@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SUTORIT REBOOT</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <header>
+        <button class="settings-btn" onclick="window.location.href='/settings.html'">
+            <svg viewBox="0 0 24 24">
+                <path
+                    d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7zm8.94-2.06l1.43 1.43a1 1 0 0 1 0 1.41l-1.52 1.52a1 1 0 0 1-1.41 0l-1.43-1.43a7.04 7.04 0 0 1-1.63.95l-.25 2.04a1 1 0 0 1-1 .87h-2.15a1 1 0 0 1-1-.87l-.25-2.04a7.04 7.04 0 0 1-1.63-.95l-1.43 1.43a1 1 0 0 1-1.41 0l-1.52-1.52a1 1 0 0 1 0-1.41l1.43-1.43a7.04 7.04 0 0 1-.95-1.63l-2.04-.25a1 1 0 0 1-.87-1V9.06a1 1 0 0 1 .87-1l2.04-.25a7.04 7.04 0 0 1 .95-1.63L4.1 4.75a1 1 0 0 1 0-1.41L5.62 1.82a1 1 0 0 1 1.41 0l1.43 1.43c.51-.34 1.05-.64 1.63-.95l.25-2.04a1 1 0 0 1 1-.87h2.15a1 1 0 0 1 1 .87l.25 2.04c.58.31 1.12.61 1.63.95l1.43-1.43a1 1 0 0 1 1.41 0l1.52 1.52a1 1 0 0 1 0 1.41l-1.43 1.43c.34.51.64 1.05.95 1.63l2.04.25a1 1 0 0 1 .87 1v2.15a1 1 0 0 1-.87 1l-2.04.25c-.31.58-.61 1.12-.95 1.63z" />
+            </svg>
+        </button>
+
+        <div class="title">REBOOT & RESET</div>
+
+        <div class="logo-container">
+            <img src="sutorit.png" alt="Logo">
+        </div>
+    </header>
+
+    <div id="status-wrapper">
+        <div id="status-indicator" class="status offline"></div>
+        <span id="status-text">Checking...</span>
+    </div>
+
+
+    <div id="loader-overlay">
+        <h2 id="loader-message">Processing...</h2>
+        <span id="timer">--</span>
+    </div>
+
+
+    <main class="reboot-page" id="main-content">
+        <button class="action-btn" onclick="openPopup('reboot')" id="reboot-btn">🔄 Reboot Device</button>
+        <button class="action-btn reset-btn" onclick="openPopup('reset')" id="reset-btn">⚠️ Factory Reset</button>
+    </main>
+
+    <!-- Overlay (stays open) -->
+    <div id="popup" class="popup-overlay">
+
+        <!-- Confirmation box -->
+        <div class="popup-box" id="confirmBox">
+            <h3 id="popup-message">Are you sure?</h3>
+            <div class="popup-actions">
+                <button class="popup-btn yes-btn" onclick="confirmAction()">Yes</button>
+                <button class="popup-btn no-btn" onclick="closePopup()">No</button>
+            </div>
+        </div>
+
+        <!-- Login Popup -->
+        <div class="login-box" id="loginPopup" style="display: none;">
+            <h2 style="text-align: center;">Login</h2>
+            <input type="text" id="username" placeholder="Username" autocomplete="off">
+            <input type="password" id="password" placeholder="Password">
+            <button onclick="submitLogin()">Login</button>
+            <button onclick="closeLogin()">Cancel</button>
+            <p id="error" class="login-error" style="display:none;">Invalid credentials</p>
+        </div>
+    </div>
+
+
+
+
+
+    <div class="footer">
+        © <script>document.write(new Date().getFullYear());</script> sutorit iot • All Rights Reserved
+      </div>
+
+
+    <script>
+        let currentAction = null;
+
+        function openPopup(action) {
+            currentAction = action;
+            const msg = action === 'reboot'
+                ? "Are you sure you want to reboot the device?"
+                : "⚠️ This will erase all settings and reset the device. Continue?";
+            document.getElementById("popup-message").textContent = msg;
+            document.getElementById("popup").style.display = "flex";
+            document.getElementById("reboot-btn").style.display = "none";
+            document.getElementById("reset-btn").style.display = "none";
+        }
+
+        function closePopup() {
+            document.getElementById("popup").style.display = "none";
+            document.getElementById("loginPopup").style.display = "none"; // make sure login also hides
+            document.getElementById("reboot-btn").style.display = "block";
+            document.getElementById("reset-btn").style.display = "block";
+        }
+
+        function confirmAction() {
+            if (currentAction === "reboot") {
+                document.getElementById("popup").style.display = "none";
+                fetch("/rebooting")
+                    .then(res => res.text())
+                    .then(() => showLoader("Rebooting...", true))
+                    .catch(err => console.error(err));
+            } else if (currentAction === "reset") {
+                // hide only the confirm box, keep overlay open
+                document.getElementById("confirmBox").style.display = "none";
+                document.getElementById("loginPopup").style.display = "block";
+            }
+        }
+
+        function closeLogin() {
+            document.getElementById("loginPopup").style.display = "none";
+            document.getElementById("confirmBox").style.display = "block"; // go back to confirm
+            document.getElementById("error").style.display = "none";
+            document.getElementById("popup").style.display = "none";
+            document.getElementById("loginPopup").style.display = "none"; // make sure login also hides
+            document.getElementById("reboot-btn").style.display = "block";
+            document.getElementById("reset-btn").style.display = "block";
+        }
+
+
+        function submitLogin() {
+            const user = document.getElementById("username").value.trim();
+            const pass = document.getElementById("password").value.trim();
+            const errorMsg = document.getElementById("error");
+
+            if (!user || !pass) {
+                errorMsg.textContent = "Please fill both fields!";
+                errorMsg.style.display = "block";
+                return;
+            }
+
+            // ✅ must match the variable name you use in fetch
+            const params = new URLSearchParams();
+            params.append("username", user);
+            params.append("password", pass);
+
+            fetch("/factoryReset", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: params.toString()   // ✅ use params here
+            })
+                .then(r => {
+                    if (r.status === 200) {
+                        return r.text();
+                    } else {
+                        throw new Error("Invalid login");
+                    }
+                })
+                .then(() => {
+                    closePopup();
+                    showLoader("Factory Resetting...", false);
+                })
+                .catch(() => {
+                    errorMsg.textContent = "Invalid credentials!";
+                    errorMsg.style.display = "block";
+                });
+        }
+
+
+        /**
+         * Show loader overlay
+         * @param {string} message - Message to display
+         * @param {boolean} redirect - true if should redirect after countdown
+         */
+        function showLoader(message, redirect) {
+            const overlay = document.getElementById("loader-overlay");
+            const timerSpan = document.getElementById("timer");
+            const loaderMessage = document.getElementById("loader-message");
+            document.getElementById("reboot-btn").style.display = "none";
+            document.getElementById("reset-btn").style.display = "none";
+
+            loaderMessage.textContent = message;
+            overlay.style.display = "block";
+
+            let seconds = 10;
+            timerSpan.textContent = seconds + " seconds";
+
+            if (!redirect) {
+                const interval = setInterval(() => {
+                    seconds--;
+                    timerSpan.textContent = seconds + " seconds";
+
+                    if (seconds <= 0) {
+                        clearInterval(interval);
+                        timerSpan.style.display = "none";
+                        loaderMessage.textContent =
+                            "Device reset complete! Please exit the page, reconnect device Wi-Fi, and set up new configuration.";
+                    }
+                }, 1000);
+                return;
+            }
+
+            // Reboot: run countdown with halfway message
+            const interval = setInterval(() => {
+                seconds--;
+                timerSpan.textContent = seconds + " seconds";
+
+                if (seconds === Math.ceil(10 / 2)) {
+                    loaderMessage.textContent = "Wait, dashboard preparing...";
+                }
+
+                if (seconds <= 0) {
+                    clearInterval(interval);
+                    overlay.style.display = "none";
+                    window.location.href = "/"; // redirect home
+                }
+            }, 1000);
+        }
+    </script>
+
+    <script>
+        window.addEventListener("load", async () => {
+            try {
+                const res = await fetch("/getConfig", { cache: "no-store" }); // prevent old cached result
+                const data = await res.json();
+
+                const statusIndicator = document.getElementById("status-indicator");
+                const statusText = document.getElementById("status-text");
+                const onlineStatus = data.onlineStatus || "Offline";
+
+                if (onlineStatus.toLowerCase() === "online") {
+                    statusIndicator.classList.remove("offline");
+                    statusIndicator.classList.add("online");
+                    statusText.textContent = "Online";
+                    statusText.style.color = "#00c853"; // green
+                } else {
+                    statusIndicator.classList.remove("online");
+                    statusIndicator.classList.add("offline");
+                    statusText.textContent = "Offline";
+                    statusText.style.color = "#d50000"; // red
+                }
+            } catch (err) {
+                console.error("Failed to load status", err);
+
+                // fallback: mark as offline
+                const statusIndicator = document.getElementById("status-indicator");
+                const statusText = document.getElementById("status-text");
+                statusIndicator.classList.remove("online");
+                statusIndicator.classList.add("offline");
+                statusText.textContent = "Offline";
+                statusText.style.color = "#d50000";
+            }
+        });
+        async function updateStatus() {
+            try {
+                const res = await fetch("/getConfig");
+                const data = await res.json();
+
+                const statusIndicator = document.getElementById("status-indicator");
+                const statusText = document.getElementById("status-text");
+                const onlineStatus = data.onlineStatus || "Offline";
+
+                if (onlineStatus.toLowerCase() === "online") {
+                    statusIndicator.classList.remove("offline");
+                    statusIndicator.classList.add("online");
+                    statusText.textContent = "Online";
+                } else {
+                    statusIndicator.classList.remove("online");
+                    statusIndicator.classList.add("offline");
+                    statusText.textContent = "Offline";
+                }
+            } catch (err) {
+                console.warn("Status update failed", err);
+            }
+        }
+
+        // Call every 10 seconds
+        setInterval(updateStatus, 10000);
+
+    </script>
+  <script src="theme.js"></script>
+
+</body>
+
+</html>

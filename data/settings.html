@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SUTORIT SETTINGS</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <header>
+    <button class="home-btn" onclick="window.location.href='/'">
+      <svg viewBox="0 0 24 24" width="24" height="24">
+        <path d="M3 10.5l9-7 9 7V21a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1V10.5z" />
+      </svg>
+    </button>
+
+    <div class="title">SETTINGS</div>
+
+    <div class="logo-container">
+      <img src="sutorit.png" alt="Logo">
+    </div>
+  </header>
+
+  <div id="status-wrapper">
+    <div id="status-indicator" class="status offline"></div>
+    <span id="status-text">Checking...</span>
+  </div>
+
+  <main class="settings-page">
+    <div class="settings-card" onclick="window.location.href='/config.html'">
+      <h3>⚙️ Setup</h3>
+      <p>Configure Wi-Fi, devices and preferences.</p>
+    </div>
+
+    <div class="settings-card" onclick="window.location.href='/reboot.html'">
+      <h3>🔄 Reboot</h3>
+      <p>Restart your device safely.</p>
+    </div>
+
+    <div class="settings-card" onclick="window.location.href='/info.html'">
+      <h3>ℹ️ About</h3>
+      <p>View system info, version and status.</p>
+    </div>
+
+     <div class="settings-card" onclick="window.location.href='/settingsutils.html'">
+      <h3>⬆️ More</h3>
+      <p>View more settings and updates</p>
+    </div>
+  </main>
+
+  <div class="footer">
+    © <script>document.write(new Date().getFullYear());</script> sutorit iot • All Rights Reserved
+  </div>
+
+<script src="theme.js"></script>
+  <script>
+    window.addEventListener("load", async () => {
+      try {
+        const res = await fetch("/getConfig", { cache: "no-store" }); // prevent old cached result
+        const data = await res.json();
+
+        const statusIndicator = document.getElementById("status-indicator");
+        const statusText = document.getElementById("status-text");
+        const onlineStatus = data.onlineStatus || "Offline";
+
+        if (onlineStatus.toLowerCase() === "online") {
+          statusIndicator.classList.remove("offline");
+          statusIndicator.classList.add("online");
+          statusText.textContent = "Online";
+          statusText.style.color = "#00c853"; // green
+        } else {
+          statusIndicator.classList.remove("online");
+          statusIndicator.classList.add("offline");
+          statusText.textContent = "Offline";
+          statusText.style.color = "#d50000"; // red
+        }
+      } catch (err) {
+        console.error("Failed to load status", err);
+
+        // fallback: mark as offline
+        const statusIndicator = document.getElementById("status-indicator");
+        const statusText = document.getElementById("status-text");
+        statusIndicator.classList.remove("online");
+        statusIndicator.classList.add("offline");
+        statusText.textContent = "Offline";
+        statusText.style.color = "#d50000";
+      }
+    });
+
+    async function updateStatus() {
+      try {
+        const res = await fetch("/getConfig");
+        const data = await res.json();
+
+        const statusIndicator = document.getElementById("status-indicator");
+        const statusText = document.getElementById("status-text");
+        const onlineStatus = data.onlineStatus || "Offline";
+
+        if (onlineStatus.toLowerCase() === "online") {
+          statusIndicator.classList.remove("offline");
+          statusIndicator.classList.add("online");
+          statusText.textContent = "Online";
+        } else {
+          statusIndicator.classList.remove("online");
+          statusIndicator.classList.add("offline");
+          statusText.textContent = "Offline";
+        }
+      } catch (err) {
+        console.warn("Status update failed", err);
+      }
+    }
+
+    // Call every 10 seconds
+    setInterval(updateStatus, 10000);
+
+  </script>
+
+</body>
+
+</html>
