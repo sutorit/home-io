@@ -11,6 +11,10 @@
 #include "schedule.h"
 #include "Utils.h"
 #include "usagesHandler.h"
+#include <Arduino.h>
+#include "esp_ota_ops.h"
+#include "esp_partition.h"
+
 
 UsageHandler usageHandler(config.acs712Pin, config.acs712Sensitivity, config.zeroCrossPin);
 bool ntpReady = false;
@@ -19,7 +23,8 @@ void setup()
 {
   Serial.begin(115200);
   delay(1000);
-
+  const esp_partition_t *p = esp_ota_get_running_partition();
+  Serial.printf("Running partition: %s @ 0x%08X\n", p->label, p->address);
   Serial.print("\n[SUTORIT ");
   Serial.print(MAX_CHANNELS);
   Serial.println("] Starting up...");

@@ -7,7 +7,7 @@
 #ifndef MAX_CHANNELS
 #define MAX_CHANNELS 8 // Change this to 4, 6, or 8 etc.
 #endif
-
+#define FIRMWARE_VERSION "V0.10.1.7"
 struct Config
 {
     String device_name;

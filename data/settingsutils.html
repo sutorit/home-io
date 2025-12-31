@@ -24,6 +24,42 @@
             <img src="sutorit.png" alt="Logo">
         </div>
     </header>
+    <!-- UPDATE POPUP -->
+    <div id="updatePopup" class="update-overlay">
+        <div class="update-card">
+
+            <div class="circle-wrap">
+                <svg class="progress-ring" width="120" height="120">
+                    <circle class="bg" cx="60" cy="60" r="52" />
+                    <circle class="progress" cx="60" cy="60" r="52" />
+                </svg>
+
+                <div class="percent-text" id="percentText">0%</div>
+
+                <!-- SUCCESS -->
+                <div class="done-check" id="doneCheck">✓</div>
+
+                <!-- FAILURE -->
+                <div class="fail-cross" id="failCross">✕</div>
+            </div>
+
+
+            <h3 id="updateTitle">Checking for updates…</h3>
+            <p id="updateDesc">Please wait</p>
+
+            <div id="updateInfo" style="display:none;">
+                <p>Current: <b id="currentVer"></b></p>
+                <p>Latest: <b id="latestVer"></b></p>
+                <ul id="updateNotes"></ul>
+            </div>
+
+            <div class="update-actions" id="updateActions" style="display:none;">
+                <button class="btn-primary" onclick="startUpdate()">Update Now</button>
+                <button class="btn-secondary" onclick="closeUpdatePopup()">Later</button>
+            </div>
+
+        </div>
+    </div>
 
     <main class="content">
         <div class="config_container">
@@ -42,11 +78,9 @@
             <!-- Update Section -->
             <div class="config-section">
                 <h2>UPDATE</h2>
-                <button class="update-btn" onclick="checkForUpdate()">
+                <button class="update-btn" onclick="checkUpdate()">
                     Check for Updates
                 </button>
-
-                <p>Check for firmware updates.</p>
             </div>
             <!-- Logout Section -->
             <div class="config-section">
@@ -125,17 +159,152 @@
         }
 
 
-        function checkForUpdate() {
-            if (!confirm("Check and install firmware update?")) return;
+    </script>
+    <script>
+        const circle = document.querySelector('.progress');
+        const radius = 52;
+        const circumference = 2 * Math.PI * radius;
 
-            function checkUpdate() {
-                fetch('/checkUpdate')
-                    .then(res => res.text())
-                    .then(txt => alert(txt))
-                    .catch(err => alert("Update failed"));
-            }
+        circle.style.strokeDasharray = circumference;
+        circle.style.strokeDashoffset = circumference;
+
+        function setProgress(p) {
+            circle.style.strokeDashoffset =
+                circumference - (p / 100) * circumference;
+            document.getElementById('percentText').innerText = p + "%";
         }
 
+        // document.addEventListener('DOMContentLoaded', () => {
+        //     document.getElementById('updatePopup').style.display = 'flex';
+        //     setTimeout(checkUpdate, 800);
+        // });
+
+        function checkUpdate() {
+            document.getElementById('updatePopup').style.display = 'flex';
+
+            // Reset UI state
+            document.querySelector('.circle-wrap').classList.remove('failed');
+            document.getElementById('doneCheck').style.display = 'none';
+            // document.getElementById('percentText').style.display = 'block';
+            setProgress(0);
+
+            fetch('/checkUpdate')
+                .then(r => {
+                    if (!r.ok) throw new Error("HTTP error");
+                    return r.json();
+                })
+                .then(d => {
+                    if (!d.update) {
+                        failUpdate("No Update Available");
+                        return;
+                    }
+
+                    document.getElementById('updateTitle').innerText = "Update Available";
+                    document.getElementById('updateDesc').innerText = "Ready to install";
+
+                    document.getElementById('currentVer').innerText = d.current;
+                    document.getElementById('latestVer').innerText = d.latest;
+
+                    const ul = document.getElementById('updateNotes');
+                    ul.innerHTML = "";
+                    d.notes.forEach(n => {
+                        const li = document.createElement('li');
+                        li.textContent = n;
+                        ul.appendChild(li);
+                    });
+
+                    document.getElementById('updateInfo').style.display = 'block';
+                    document.getElementById('updateActions').style.display = 'flex';
+                })
+                .catch(() => {
+                    failUpdate("Update Check Failed");
+                });
+        }
+
+
+        let timer = null;
+
+        function startUpdate() {
+            document.getElementById('updateInfo').style.display = 'none';
+            document.getElementById('updateActions').style.display = 'none';
+
+            document.getElementById('updateTitle').innerText = "Updating…";
+            document.getElementById('updateDesc').innerText = "Do not power off";
+
+            fetch('/startUpdate');
+            timer = setInterval(getProgress, 500);
+        }
+
+        function getProgress() {
+            fetch('/otaProgress')
+                .then(r => r.json())
+                .then(d => {
+                    setProgress(d.progress);
+
+                    if (!d.running && d.progress >= 99) {
+                        clearInterval(timer);
+                        finish();
+                    }
+                });
+        }
+
+        function finish() {
+            clearInterval(timer);
+
+            const wrap = document.querySelector('.circle-wrap');
+
+            // REMOVE other states
+            wrap.classList.remove('failed');
+
+            // ADD SUCCESS STATE
+            wrap.classList.add('success');
+
+            // Safety hide %
+            const percent = document.getElementById('percentText');
+            percent.style.display = 'none';
+
+            document.getElementById('updateTitle').innerText = "Update Complete";
+            document.getElementById('updateTitle').classList.remove('update-failed');
+            document.getElementById('updateTitle').classList.add('update-success');
+
+            document.getElementById('updateDesc').innerText = "Restarting…";
+
+            // Redirect after reboot
+            setTimeout(() => {
+                window.location.replace("/");
+            }, 2500);
+        }
+
+
+        function closeUpdatePopup() {
+            document.getElementById('updatePopup').style.display = 'none';
+        }
+
+        function failUpdate(reason = "Update Check Failed") {
+            clearInterval(timer);
+
+            const wrap = document.querySelector('.circle-wrap');
+            wrap.classList.add('failed');
+
+            // HIDE % TEXT (INLINE STYLE FIX)
+            document.getElementById('percentText').style.display = 'none';
+
+            // SHOW FAIL ICON (CORRECT ELEMENT)
+            document.getElementById('failCross').style.display = 'flex';
+            document.getElementById('doneCheck').style.display = 'none';
+
+            document.getElementById('updateTitle').innerText = reason;
+            document.getElementById('updateTitle').classList.add('update-failed');
+
+            document.getElementById('updateDesc').innerText = "Please try again";
+        }
+
+        // Close popup when clicking outside the card
+        document.getElementById('updatePopup').addEventListener('click', function (e) {
+            if (e.target === this) {
+                closeUpdatePopup();
+            }
+        });
 
     </script>
 </body>

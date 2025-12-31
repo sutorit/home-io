@@ -242,15 +242,22 @@ header {
   margin-top: 1rem;
   border: none;
   border-radius: 0.5rem;
-  background: #ffd900;
+  background: #1371ff;
   color: var(--text-main);
   font-weight: bold;
   cursor: pointer;
   transition: 0.2s;
 }
 
+.login-box .cancel{
+  background: #ff1008;
+}
+
+.login-box .cancel:hover{
+  background: #ff7c02;
+}
 .login-box button:hover {
-  background: #ffea55;
+  background: #01b446;
 }
 
 .login-error {
@@ -638,7 +645,7 @@ select {
 }
 
 .password-wrapper input {
-  padding-right: 40px; 
+  padding-right: 40px;
 }
 
 .eye-pass {
@@ -1106,4 +1113,251 @@ input::placeholder {
     margin-top: 10px;
   }
 
+}
+
+.password-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.password-wrapper input {
+  width: 100%;
+  padding-right: 40px;
+}
+
+.toggle-password {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: pointer;
+  user-select: none;
+  font-size: 18px;
+  opacity: 0.6;
+}
+
+.toggle-password:hover {
+  opacity: 1;
+}
+
+
+/* ================= UPDATE OVERLAY ================= */
+
+.update-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(8px);
+}
+
+/* ================= UPDATE CARD ================= */
+
+.update-card {
+  width: 320px;
+  padding: 26px;
+  border-radius: 18px;
+  text-align: center;
+
+  background: rgba(25, 30, 35, 0.55);
+  backdrop-filter: blur(12px);
+
+  color: #fff;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.281);
+  animation: popupIn 0.35s ease;
+}
+
+.update-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 16px;
+
+}
+
+.btn-primary,
+.btn-secondary {
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: bold;
+  cursor: pointer;
+  background-color: #0077cc;
+  color: white;
+}
+
+.btn-secondary {
+  background-color: #4e0f04;
+}
+
+
+@keyframes popupIn {
+  from {
+    transform: scale(0.85);
+    opacity: 0;
+  }
+
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* ================= CIRCLE ================= */
+
+.circle-wrap {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  margin: 0 auto 18px;
+}
+
+/* ================= PROGRESS RING ================= */
+
+.progress-ring {
+  transform: rotate(-90deg);
+}
+
+.progress-ring circle {
+  fill: none;
+  stroke-width: 8;
+}
+
+.progress-ring .bg {
+  stroke: rgba(255, 255, 255, 0.18);
+}
+
+.progress-ring .progress {
+  stroke: #00ffd5;
+  stroke-dasharray: 327;
+  stroke-dashoffset: 327;
+  transition: stroke-dashoffset 0.4s ease;
+}
+
+/* ================= PERCENT ================= */
+
+.percent-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+/* ================= SUCCESS ICON ================= */
+
+.done-check {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 58px;
+  font-weight: 900;
+  color: #000;
+  z-index: 2;
+}
+
+/* ================= FAIL ICON ================= */
+
+.fail-cross {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 58px;
+  font-weight: 900;
+  color: #ff3b3b;
+  z-index: 2;
+}
+
+/* ================= FAILURE STATE ================= */
+
+.circle-wrap.failed .progress-ring,
+.circle-wrap.failed .percent-text {
+  display: none;
+  /* 🔥 FIX: hides 0% */
+}
+
+.circle-wrap.failed::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #000;
+  animation: pulse 0.35s ease;
+}
+
+.circle-wrap.failed .fail-cross {
+  display: flex;
+  animation: iconPop 0.45s ease forwards;
+}
+
+/* ================= SUCCESS STATE ================= */
+
+.circle-wrap.success .progress-ring,
+.circle-wrap.success .percent-text {
+  display: none;
+}
+
+.circle-wrap.success::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #00ffd5;
+  animation: pulse 0.35s ease;
+}
+
+.circle-wrap.success .done-check {
+  display: flex;
+  animation: iconPop 0.45s ease forwards;
+}
+
+/* ================= TEXT ================= */
+
+.update-failed {
+  color: #ff3b3b;
+  font-weight: 800;
+}
+
+.update-success {
+  color: #00ffd5;
+  font-weight: 800;
+}
+
+/* ================= ANIMATIONS ================= */
+
+@keyframes iconPop {
+  0% {
+    transform: scale(0) rotate(-90deg);
+    opacity: 0;
+  }
+
+  70% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes pulse {
+  from {
+    transform: scale(0.85);
+    opacity: 0;
+  }
+
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
 }

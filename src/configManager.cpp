@@ -3,8 +3,6 @@
 #include <SPIFFS.h>
 #include <WiFi.h> // needed for WiFi.localIP()
 
-#define FIRMWARE_VERSION "V0.10.1.7"
-
 
 Config config;
 ConfigManager configManager;
@@ -80,7 +78,7 @@ bool ConfigManager::load()
         config.switch_pins[i] = (i < switches.size() && !switches[i].isNull()) ? switches[i].as<int>() : (i < maxDefault ? defaultSwitchPins[i] : 0);
         config.switch_to_output[i] = (i < mapping.size() && !mapping[i].isNull()) ? mapping[i].as<int>() - 1 : i;
         config.switch_type[i] = (i < types.size() && !types[i].isNull()) ? types[i].as<String>() : "ac";      // default AC
-        config.switch_logic[i] = (i < logic.size() && !logic[i].isNull()) ? logic[i].as<String>() : "toggle"; // NEW
+        config.switch_logic[i] = (i < logic.size() && !logic[i].isNull()) ? logic[i].as<String>() : "push"; // NEW
     }
 
     generateDeviceID();
@@ -186,7 +184,7 @@ void ConfigManager::setDefaults()
         config.switch_pins[i] = (i < maxDefault) ? defaultSwitchPins[i] : 0;
         config.switch_to_output[i] = i;
         config.switch_type[i] = "ac";      // default all AC
-        config.switch_logic[i] = "toggle"; // NEW default
+        config.switch_logic[i] = "push"; // NEW default
     }
     generateDeviceID();
 }

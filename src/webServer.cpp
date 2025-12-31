@@ -218,7 +218,7 @@ void WebServer::registerRoutes()
     doc["onlineStatus"]    = config.OnlineStatus;
 
     // Firmware version
-    doc["firmwareVersion"]  = "V0.10.1.5"; // Update this when releasing new firmware!
+    doc["firmwareVersion"]  = String(FIRMWARE_VERSION); // Update this when releasing new firmware!
 
     // Uptime calculation
     unsigned long ms = millis();

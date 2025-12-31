@@ -56,10 +56,14 @@
         <!-- Login Popup -->
         <div class="login-box" id="loginPopup" style="display: none;">
             <h2 style="text-align: center;">Login</h2>
-            <input type="text" id="username" placeholder="Username" autocomplete="off">
-            <input type="password" id="password" placeholder="Password">
+            <input type="text" id="username" placeholder="Device Name" autocomplete="off">
+            <div class="password-wrapper">
+                <input type="password" id="password" placeholder="Password">
+                <span class="toggle-password" onclick="togglePassword()">👁️</span>
+            </div>
+
             <button onclick="submitLogin()">Login</button>
-            <button onclick="closeLogin()">Cancel</button>
+            <button onclick="closeLogin()" class="cancel">Cancel</button>
             <p id="error" class="login-error" style="display:none;">Invalid credentials</p>
         </div>
     </div>
@@ -69,8 +73,9 @@
 
 
     <div class="footer">
-        © <script>document.write(new Date().getFullYear());</script> sutorit iot • All Rights Reserved
-      </div>
+        ©
+        <script>document.write(new Date().getFullYear());</script> sutorit iot • All Rights Reserved
+    </div>
 
 
     <script>
@@ -123,14 +128,14 @@
             const user = document.getElementById("username").value.trim();
             const pass = document.getElementById("password").value.trim();
             const errorMsg = document.getElementById("error");
-
+            user = user.replace(/\s+/g, "").toUpperCase();
             if (!user || !pass) {
                 errorMsg.textContent = "Please fill both fields!";
                 errorMsg.style.display = "block";
                 return;
             }
 
-            // ✅ must match the variable name you use in fetch
+            // must match the variable name you use in fetch
             const params = new URLSearchParams();
             params.append("username", user);
             params.append("password", pass);
@@ -157,7 +162,18 @@
                 });
         }
 
+        function togglePassword() {
+            const pwd = document.getElementById("password");
+            const eye = document.querySelector(".toggle-password");
 
+            if (pwd.type === "password") {
+                pwd.type = "text";
+                eye.textContent = "🙈";
+            } else {
+                pwd.type = "password";
+                eye.textContent = "👁️";
+            }
+        }
         /**
          * Show loader overlay
          * @param {string} message - Message to display
@@ -269,7 +285,7 @@
         setInterval(updateStatus, 10000);
 
     </script>
-  <script src="theme.js"></script>
+    <script src="theme.js"></script>
 
 </body>
 

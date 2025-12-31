@@ -21,7 +21,11 @@
         <div class="login-box">
             <h2>Login</h2>
             <input type="text" id="username" placeholder="Device Name" autocomplete="off">
-            <input type="password" id="password" placeholder="Password">
+            <div class="password-wrapper">
+                <input type="password" id="password" placeholder="Password">
+                <span class="toggle-password" onclick="togglePassword()">👁️</span>
+            </div>
+
             <button onclick="login()">Sign In</button>
             <p id="error" class="login-error">Invalid credentials</p>
         </div>
@@ -72,7 +76,21 @@
                 });
         }
 
+        function togglePassword() {
+            const pwd = document.getElementById("password");
+            const eye = document.querySelector(".toggle-password");
+
+            if (pwd.type === "password") {
+                pwd.type = "text";
+                eye.textContent = "🙈";
+            } else {
+                pwd.type = "password";
+                eye.textContent = "👁️";
+            }
+        }
+
     </script>
 
 </body>
+
 </html>
