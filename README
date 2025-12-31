@@ -50,3 +50,7 @@ pio run --target uploadfs
 
 ## 2nd Upload Code
 pio run -t upload -e esp32dev
+
+## upload firmware
+gh release create v0.10.1.6 .pio/build/esp32dev/firmware.bin
+  --notes "Stable OTA firmware"
