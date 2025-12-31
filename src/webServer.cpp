@@ -411,6 +411,6 @@ void WebServer::startNormalMode()
     xTaskCreate(relayTask, "RelayTask", 8192, NULL, 2, NULL); // bigger stack and slightly higher prio
 
     registerRoutes();
-     setupUpdateEndpoint(server);
+    setupUpdateEndpoint(server, hasValidSession);
     server.begin();
 }

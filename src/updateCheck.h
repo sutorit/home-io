@@ -4,10 +4,9 @@
 #include <Arduino.h>
 #include <ESPAsyncWebServer.h>
 
-// Tell compiler this function exists elsewhere
-bool hasValidSession(AsyncWebServerRequest *req);
+typedef bool (*SessionCheckFn)(AsyncWebServerRequest *);
 
-void setupUpdateEndpoint(AsyncWebServer &server);
+void setupUpdateEndpoint(AsyncWebServer &server, SessionCheckFn sessionCheck);
 void startOTA();
 
 #endif

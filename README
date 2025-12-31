@@ -49,4 +49,4 @@ More information about PlatformIO Library Dependency Finder
 pio run --target uploadfs
 
 ## 2nd Upload Code
-pio run --target uploadfs
+pio run -t upload -e esp32dev

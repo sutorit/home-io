@@ -128,14 +128,12 @@
         function checkForUpdate() {
             if (!confirm("Check and install firmware update?")) return;
 
-            fetch("/checkUpdate")
-                .then(res => res.text())
-                .then(msg => {
-                    alert(msg);
-                })
-                .catch(err => {
-                    alert("Update failed: " + err);
-                });
+            function checkUpdate() {
+                fetch('/checkUpdate')
+                    .then(res => res.text())
+                    .then(txt => alert(txt))
+                    .catch(err => alert("Update failed"));
+            }
         }
 
 

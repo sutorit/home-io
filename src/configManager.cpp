@@ -3,6 +3,9 @@
 #include <SPIFFS.h>
 #include <WiFi.h> // needed for WiFi.localIP()
 
+#define FIRMWARE_VERSION "V0.10.1.7"
+
+
 Config config;
 ConfigManager configManager;
 
