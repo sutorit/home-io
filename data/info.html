@@ -33,7 +33,9 @@
       <!-- <p><strong>Mode:</strong> Loading...</p> -->
       <p><strong>IP Address:</strong> Loading...</p>
       <p><strong>Uptime:</strong> Loading...</p>
-      <p><strong>Firmware Version:</strong> </p>
+      <p><strong>Firmware Version:</strong>
+      <p>
+      <p><strong>Last Firmware Features & Fixed Details:</strong></p>
     </div>
 
     <!-- Company Info Card -->
@@ -48,42 +50,43 @@
   </main>
 
   <div class="footer">
-    © <script>document.write(new Date().getFullYear());</script> sutorit iot • All Rights Reserved
+    ©
+    <script>document.write(new Date().getFullYear());</script> sutorit iot • All Rights Reserved
   </div>
 
 
-<script src="theme.js"></script> 
+  <script src="theme.js"></script>
 
-<script>
-let uptimeSeconds = 0;
+  <script>
+    let uptimeSeconds = 0;
 
-// Convert "0 days 00:01:06" to total seconds
-function parseUptime(uptimeStr) {
-  const match = uptimeStr.match(/(\d+) days (\d+):(\d+):(\d+)/);
-  if (!match) return 0;
-  const days = parseInt(match[1]);
-  const hours = parseInt(match[2]);
-  const minutes = parseInt(match[3]);
-  const seconds = parseInt(match[4]);
-  return days*86400 + hours*3600 + minutes*60 + seconds;
-}
+    // Convert "0 days 00:01:06" to total seconds
+    function parseUptime(uptimeStr) {
+      const match = uptimeStr.match(/(\d+) days (\d+):(\d+):(\d+)/);
+      if (!match) return 0;
+      const days = parseInt(match[1]);
+      const hours = parseInt(match[2]);
+      const minutes = parseInt(match[3]);
+      const seconds = parseInt(match[4]);
+      return days * 86400 + hours * 3600 + minutes * 60 + seconds;
+    }
 
-// Convert seconds back to "0 days 00:01:06"
-function formatUptime(seconds) {
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return `${d} days ${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
-}
+    // Convert seconds back to "0 days 00:01:06"
+    function formatUptime(seconds) {
+      const d = Math.floor(seconds / 86400);
+      const h = Math.floor((seconds % 86400) / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = seconds % 60;
+      return `${d} days ${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
 
-async function loadDeviceInfo() {
-  try {
-    const res = await fetch('/getConfig');
-    const data = await res.json();
+    async function loadDeviceInfo() {
+      try {
+        const res = await fetch('/getConfig');
+        const data = await res.json();
 
-    // Fill initial info
-    document.getElementById('info').innerHTML = `
+        // Fill initial info
+        document.getElementById('info').innerHTML = `
       <h2>Device Information</h2>
       <p><strong>Device Name:</strong> ${data.deviceName || 'N/A'}</p>
       <p><strong>Device Status:</strong> ${data.onlineStatus || 'Offline'}</p>
@@ -91,25 +94,37 @@ async function loadDeviceInfo() {
       <p><strong>IP Address:</strong> ${data.ip || 'N/A'}</p>
       <p><strong>Uptime:</strong> <span id="uptime">${data.uptime || '0 days 00:00:00'}</span></p>
       <p><strong>Firmware Version:</strong> ${data.firmwareVersion || 'N/A'}</p>
-    `;
+      <p><strong>Last Firmware Features & Fixed Details:</strong></p>
+      <ul>${Array.isArray(data.lastReleaseNotes)
+            ? data.lastReleaseNotes.map(note => `<li>${note}</li>`).join('')
+            : typeof data.lastReleaseNotes === "string"
+              ? data.lastReleaseNotes
+                .split('\n')
+                .map(note => note.trim())
+                .filter(note => note.length > 0)
+                .map(note => `<li>${note}</li>`)
+                .join('')
+              : '<li>New Device Check Updates</li>'
+          }
+        </ul>`;
 
-    // Parse initial uptime
-    uptimeSeconds = parseUptime(data.uptime || "0 days 00:00:00");
+        // Parse initial uptime
+        uptimeSeconds = parseUptime(data.uptime || "0 days 00:00:00");
 
-    // Update uptime every second
-    setInterval(() => {
-      uptimeSeconds++;
-      document.getElementById('uptime').textContent = formatUptime(uptimeSeconds);
-    }, 1000);
+        // Update uptime every second
+        setInterval(() => {
+          uptimeSeconds++;
+          document.getElementById('uptime').textContent = formatUptime(uptimeSeconds);
+        }, 1000);
 
-  } catch (err) {
-    console.error('Failed to fetch device info', err);
-    document.getElementById('info').innerHTML = '<p style="color:red;">Failed to load device information.</p>';
-  }
-}
+      } catch (err) {
+        console.error('Failed to fetch device info', err);
+        document.getElementById('info').innerHTML = '<p style="color:red;">Failed to load device information.</p>';
+      }
+    }
 
-window.addEventListener('load', loadDeviceInfo);
-</script>
+    window.addEventListener('load', loadDeviceInfo);
+  </script>
 
 
 </body>

@@ -8,6 +8,9 @@ SwitchControl switchControl;
 static constexpr bool ACTIVE_LOW = false; // most relay boards
 static portMUX_TYPE triacMux = portMUX_INITIALIZER_UNLOCKED;
 
+#define TRIAC_ON (ACTIVE_LOW ? LOW : HIGH)
+#define TRIAC_OFF (ACTIVE_LOW ? HIGH : LOW)
+
 // Timers for publish throttling
 static unsigned long lastMqttPublish[MAX_CHANNELS] = {0};
 static unsigned long lastFirebasePublish[MAX_CHANNELS] = {0};
@@ -18,7 +21,7 @@ bool scheduledOverride[MAX_CHANNELS] = {false};
 
 // If true, when turning off a relay, the brightness is remembered and restored when turning back on.
 // If false, turning off a relay sets brightness to 0, turning on sets brightness to
-static constexpr bool lastUpdateState = false;
+// static constexpr bool lastUpdateState = false;
 
 // // triac scheduling state (for AC dimming) - shared with ISR & loop
 // volatile bool zeroCrossDetected = false;
@@ -29,10 +32,11 @@ static constexpr bool lastUpdateState = false;
 
 volatile bool zeroCrossDetected = false;
 volatile int64_t lastZeroCrossTime = 0;
+int64_t nowUs = esp_timer_get_time();
+int64_t zcTs;
 volatile int64_t triacFireAtUs[MAX_CHANNELS];
 volatile bool triacPulseActive[MAX_CHANNELS];
 volatile int64_t triacPulseEndAtUs[MAX_CHANNELS];
-
 
 #define AC_CYCLE_US 10000  // ~10ms per half-cycle (50Hz)
 #define MIN_DELAY_US 200   // Safety clamp
@@ -42,6 +46,8 @@ volatile int64_t triacPulseEndAtUs[MAX_CHANNELS];
 bool cloudPending[MAX_CHANNELS] = {false};
 bool cloudState[MAX_CHANNELS] = {false};
 bool relayState[MAX_CHANNELS] = {false};
+bool switchInitialized[MAX_CHANNELS] = {false};
+bool lastUpdateState[MAX_CHANNELS] = {false};
 uint8_t relayBrightness[MAX_CHANNELS] = {0};
 
 // For debouncing physical switches (preserved from your code)
@@ -75,7 +81,6 @@ void IRAM_ATTR onZeroCross()
     portEXIT_CRITICAL_ISR(&triacMux);
 }
 
-
 // ----------------- Helper: publish state -----------------
 void SwitchControl::publishState(uint8_t ch)
 {
@@ -92,29 +97,26 @@ void SwitchControl::publishState(uint8_t ch)
         return;
     }
 
-    // MQTT (fast)
+    // MQTT
     if (systemState.mqttReady && now - lastMqttPublish[idx] > mqttPublishIntervalMs)
     {
-        mqttHandler.publishRelayState(ch, relayState[idx], relayBrightness[idx]);
-        lastMqttPublish[idx] = now;
+        int mqttValue = relayState[idx] ? relayBrightness[idx] : 0; // 0 if OFF, brightness (1–100) if ON
+        Serial.printf("[publishState] CH%d -> MQTT %d%%\n", ch, mqttValue);
+        mqttHandler.publishRelayState(ch, mqttValue); // updated to send brightness
+        lastMqttPublish[idx] = now;                   // update timestamp after publish
     }
 
-    // Firebase (slower, MUST USE BRIGHTNESS)
+    // Firebase
     if (systemState.firebaseReady && now - lastFirebasePublish[idx] > firebasePublishIntervalMs)
     {
-        int fbValue = relayState[idx] ? relayBrightness[idx] : 0;
+        int fbValue = relayState[idx] ? relayBrightness[idx] : 0; // 0 if OFF, brightness (1–100) if ON
 
-        firebaseHandler.sendRelayState(
-            ch,
-            fbValue
-        );
-
-        lastFirebasePublish[idx] = now;
+        firebaseHandler.sendRelayState(ch, fbValue); // updated to send brightness
+        lastFirebasePublish[idx] = now;              // update timestamp after publish
     }
 
     yield();
 }
-
 
 // ----------------- Initialization -----------------
 void SwitchControl::begin()
@@ -137,25 +139,40 @@ void SwitchControl::begin()
         if (pin >= 0)
         {
             pinMode(pin, OUTPUT);
-            relayState[i] = false;
-            relayBrightness[i] = 0;
+            relayState[i] = config.output_state[i];
+            relayBrightness[i] = relayState[i] ? (lastBrightness[i] ? lastBrightness[i] : 100) : 0;
+            lastUpdateState[i] = relayState[i];
 
             // Setup PWM for brightness (DC)
             if (config.switch_type[i] == "dc")
             {
                 int pwmChannel = pwmChannelForIdx[i];
-                // Use 8-bit resolution
                 ledcSetup(pwmChannel, 5000, 8);
                 ledcAttachPin(pin, pwmChannel);
 
-                uint8_t pwmOff = ACTIVE_LOW ? 255 : 0;
-                ledcWrite(pwmChannel, pwmOff); // use pwmChannel, not i
+                uint8_t pwmVal = map(relayBrightness[i], 0, 100, 0, 255);
+                if (ACTIVE_LOW)
+                    pwmVal = 255 - pwmVal;
+                ledcWrite(pwmChannel, pwmVal);
             }
-            else
+            else // AC
             {
-                digitalWrite(pin, ACTIVE_LOW ? HIGH : LOW); // ensure triac off
+                // if (relayState[i])
+                // {
+                //     digitalWrite(pin, TRIAC_OFF); // arm triac
+                // }
+                // else
+                // {
+                //     digitalWrite(pin, TRIAC_OFF); // keep off
+                // }
+                digitalWrite(pin, TRIAC_OFF);
             }
-            Serial.printf("[RelayMap] CH%d -> pin %d (initial OFF)\n", i + 1, pin);
+
+            // Serial.printf(
+            //     "[RelayMap] CH%d -> pin %d (initial %s)\n",
+            //     i + 1,
+            //     pin,
+            //     relayState[i] ? "ON" : "OFF");
         }
     }
 
@@ -166,32 +183,35 @@ void SwitchControl::begin()
         if (swPin >= 0)
         {
             pinMode(swPin, INPUT_PULLUP); // active LOW
-            lastSwitchReading[i] = HIGH;
-            switchState[i] = HIGH;
+            int r = digitalRead(swPin);
+            lastSwitchReading[i] = r;
+            switchState[i] = r;
+
             lastDebounceTime[i] = millis();
+            switchInitialized[i] = true;
             // Default SWi → CHi if invalid
             if (config.switch_to_output[i] < 0 || config.switch_to_output[i] >= MAX_CHANNELS)
                 config.switch_to_output[i] = i;
-            Serial.printf("[SwitchMap] SW%d -> pin %d → controls Relay CH%d\n",
-                          i + 1, swPin, config.switch_to_output[i] + 1);
+            // Serial.printf("[SwitchMap] SW%d -> pin %d → controls Relay CH%d\n",
+            //               i + 1, swPin, config.switch_to_output[i] + 1);
         }
     }
 
     // Fix duplicate mappings
-    for (int i = 0; i < MAX_CHANNELS; i++)
-    {
-        int mappedRelay = config.switch_to_output[i];
-        for (int j = 0; j < i; j++)
-        {
-            if (config.switch_to_output[j] == mappedRelay)
-            {
-                config.switch_to_output[i] = i;
-                Serial.printf("[FixMap] SW%d had duplicate relay → reassigned to CH%d\n",
-                              i + 1, i + 1);
-                break;
-            }
-        }
-    }
+    // for (int i = 0; i < MAX_CHANNELS; i++)
+    // {
+    //     int mappedRelay = config.switch_to_output[i];
+    //     for (int j = 0; j < i; j++)
+    //     {
+    //         if (config.switch_to_output[j] == mappedRelay)
+    //         {
+    //             config.switch_to_output[i] = i;
+    //             Serial.printf("[FixMap] SW%d had duplicate relay → reassigned to CH%d\n",
+    //                           i + 1, i + 1);
+    //             break;
+    //         }
+    //     }
+    // }
 
     // initialize triac arrays
     for (int i = 0; i < MAX_CHANNELS; ++i)
@@ -203,6 +223,40 @@ void SwitchControl::begin()
 
     Serial.println("SwitchControl initialized (non-blocking AC/DC dimming)");
 }
+
+// ----------------- Switch Mapping Swap -----------------
+// void SwitchControl::setSwitchMapping(uint8_t sw, uint8_t newChannel)
+// {
+//     if (sw >= MAX_CHANNELS || newChannel >= MAX_CHANNELS)
+//         return;
+
+//     int oldChannel = config.switch_to_output[sw];
+
+//     if (oldChannel == newChannel)
+//         return;
+
+//     // Find which switch already uses newChannel
+//     for (int i = 0; i < MAX_CHANNELS; i++)
+//     {
+//         if (i == sw)
+//             continue;
+
+//         if (config.switch_to_output[i] == newChannel)
+//         {
+//             config.switch_to_output[i] = oldChannel; // swap
+//             break;
+//         }
+//     }
+
+//     config.switch_to_output[sw] = newChannel;
+
+//     configManager.save();
+
+//     Serial.printf("[SwapMap] SW%d ↔ CH%d (old CH%d swapped)\n",
+//                   sw + 1,
+//                   newChannel + 1,
+//                   oldChannel + 1);
+// }
 
 // ----------------- Relay ON/OFF -----------------
 void SwitchControl::setRelay(uint8_t ch, bool state, bool publish)
@@ -221,13 +275,22 @@ void SwitchControl::setRelay(uint8_t ch, bool state, bool publish)
 
     // Update internal state
     relayState[idx] = state;
-    relayBrightness[idx] = state ? 100 : 0;
+    if (!state)
+    {
+        lastBrightness[idx] = relayBrightness[idx];
+        relayBrightness[idx] = 0;
+    }
+    else
+    {
+        if (relayBrightness[idx] == 0)
+            relayBrightness[idx] = lastBrightness[idx] ? lastBrightness[idx] : 100;
+    }
 
     // ------------------ Update hardware ------------------
     if (config.switch_type[idx] == "dc")
     {
         // DC dimming uses PWM
-        if (!lastUpdateState)
+        if (!lastUpdateState[idx])
         {
             uint8_t duty = ACTIVE_LOW ? (state ? 0 : 255) : (state ? 255 : 0);
             ledcWrite(pwmChannelForIdx[idx], duty);
@@ -259,7 +322,9 @@ void SwitchControl::setRelay(uint8_t ch, bool state, bool publish)
         if (state)
         {
             relayBrightness[idx] = 100;
+            digitalWrite(pin, TRIAC_ON); // arm optotriac gate
         }
+
         else
         {
             relayBrightness[idx] = 0;
@@ -269,7 +334,7 @@ void SwitchControl::setRelay(uint8_t ch, bool state, bool publish)
             triacPulseActive[idx] = false;
             triacPulseEndAtUs[idx] = 0;
             interrupts();
-            digitalWrite(pin, ACTIVE_LOW ? HIGH : LOW); // Ensure triac off
+            digitalWrite(pin, TRIAC_OFF); // Ensure triac off
         }
     }
 
@@ -281,6 +346,15 @@ void SwitchControl::setRelay(uint8_t ch, bool state, bool publish)
     Serial.printf("[setRelay] CH%d -> pin %d → %s (type=%s, brightness=%d)\n",
                   ch, pin, state ? "ON" : "OFF",
                   config.switch_type[idx].c_str(), relayBrightness[idx]);
+
+    lastUpdateState[idx] = state;
+    config.output_state[idx] = state;
+    static unsigned long lastSave = 0;
+    if (millis() - lastSave > 2000)
+    {
+        configManager.save();
+        lastSave = millis();
+    }
 }
 
 // ----------------- Brightness -----------------
@@ -288,16 +362,18 @@ void SwitchControl::setBrightness(uint8_t ch, uint8_t value, bool publish)
 {
     if (ch < 1 || ch > MAX_CHANNELS)
         return;
+
     int idx = ch - 1;
     int pin = config.relay_pins[idx];
     if (pin < 0)
         return;
 
     value = constrain(value, 0, 100);
+
     relayBrightness[idx] = value;
     relayState[idx] = (value > 0);
 
-    // Update hardware
+    // Hardware
     if (config.switch_type[idx] == "dc")
     {
         uint8_t pwmVal = map(value, 0, 100, 0, 255);
@@ -307,15 +383,25 @@ void SwitchControl::setBrightness(uint8_t ch, uint8_t value, bool publish)
     }
     else
     {
-        // For AC dimming, brightness handled in loop() after zero-cross
-        // Ensure output idle state is correct (triac idle)
-        digitalWrite(pin, ACTIVE_LOW ? HIGH : LOW); // default off
+        digitalWrite(pin, TRIAC_OFF);
     }
 
     if (publish)
         publishState(ch);
 
-    Serial.printf("[setBrightness] CH%d -> %d%% (%s)\n", ch + 1 - 1 + 1, value, config.switch_type[idx].c_str());
+    Serial.printf("[setBrightness] CH%d -> %d%% (%s)\n",
+                  ch, value, config.switch_type[idx].c_str());
+
+    //  keep state consistent
+    lastUpdateState[idx] = relayState[idx];
+    config.output_state[idx] = relayState[idx];
+
+    static unsigned long lastSave = 0;
+    if (millis() - lastSave > 2000)
+    {
+        configManager.save();
+        lastSave = millis();
+    }
 }
 
 // ----------------- Helpers -----------------
@@ -344,8 +430,10 @@ void SwitchControl::enqueueCloudSet(uint8_t ch, bool state)
 {
     if (ch < 1 || ch > MAX_CHANNELS)
         return;
-    cloudState[ch - 1] = state;
-    cloudPending[ch - 1] = true;
+
+    int idx = ch - 1;
+    cloudState[idx] = state;
+    cloudPending[idx] = true;
 }
 
 // ----------------- Loop -----------------
@@ -407,9 +495,9 @@ void SwitchControl::loop()
 
         // Read scheduled time and active flags atomically-ish
         noInterrupts();
-        unsigned long scheduledAt = triacFireAtUs[i];
+        int64_t scheduledAt = triacFireAtUs[i];
         bool active = triacPulseActive[i];
-        unsigned long pulseEnd = triacPulseEndAtUs[i];
+        int64_t pulseEnd = triacPulseEndAtUs[i];
         interrupts();
 
         // If it's time to start pulse
@@ -417,7 +505,7 @@ void SwitchControl::loop()
         {
             // start pulse
             // digitalWrite(config.relay_pins[i], ACTIVE_LOW ? HIGH : HIGH); // pulse active level (depends on optotriac)
-            digitalWrite(config.relay_pins[i], HIGH);
+            digitalWrite(config.relay_pins[i], TRIAC_ON);
             noInterrupts();
             triacPulseActive[i] = true;
             triacPulseEndAtUs[i] = nowUs + TRIAC_PULSE_US;
@@ -430,7 +518,7 @@ void SwitchControl::loop()
         if (active && (long)(nowUs - pulseEnd) >= 0)
         {
             // digitalWrite(config.relay_pins[i], ACTIVE_LOW ? LOW : LOW); // back to idle
-            digitalWrite(config.relay_pins[i], LOW);
+            digitalWrite(config.relay_pins[i], TRIAC_OFF);
             noInterrupts();
             triacPulseActive[i] = false;
             triacPulseEndAtUs[i] = 0;
@@ -439,7 +527,7 @@ void SwitchControl::loop()
 
         // allow background tasks to run a tiny bit in long loops
         // but avoid calling delay() here to preserve pulse timing — use yield()
-        yield();
+        // yield();
     }
 
     // --- Cloud Sync Updates (apply cloud pending states throttled) ---
@@ -454,70 +542,131 @@ void SwitchControl::loop()
         }
     }
 
-    // --- Physical Switch Handling (for manual press) ---
+    // --- Physical Switch Handling (FULLY FIXED) ---
     for (int i = 0; i < MAX_CHANNELS; i++)
     {
         if (config.switch_pins[i] < 0)
             continue;
 
         bool reading = digitalRead(config.switch_pins[i]);
+
+        // -------- Debounce --------
         if (reading != lastSwitchReading[i])
             lastDebounceTime[i] = millis();
 
-        if ((millis() - lastDebounceTime[i]) > debounceDelay)
+        if ((millis() - lastDebounceTime[i]) < debounceDelay)
         {
-            if (reading != switchState[i])
-            {
-                switchState[i] = reading;
-
-                int relayIndex = config.switch_to_output[i];
-                if (relayIndex < 0 || relayIndex >= MAX_CHANNELS)
-                    continue;
-
-                String logic = config.switch_logic[i];
-                Serial.printf("[Switch] SW%d changed (logic=%s) → Relay CH%d\n",
-                              i + 1, logic.c_str(), relayIndex + 1);
-
-                if (logic == "toggle")
-                {
-                    if (switchState[i] == LOW)
-                        toggleRelay(relayIndex + 1, false);
-                }
-                else if (logic == "bell")
-                {
-                    if (switchState[i] == LOW)
-                    {
-                        setRelay(relayIndex + 1, true, false);
-                        delay(200);
-                        setRelay(relayIndex + 1, false, false);
-                    }
-                }
-                else if (logic == "push")
-                {
-                    bool pressed = (switchState[i] == LOW); // active LOW button
-                    setRelay(relayIndex + 1, pressed, false);
-                    Serial.printf("[Push] SW%d %s -> CH%d = %s\n",
-                                  i + 1,
-                                  pressed ? "PRESSED" : "RELEASED",
-                                  relayIndex + 1,
-                                  pressed ? "ON" : "OFF");
-                }
-                else if (logic == "2way")
-                {
-                    if (switchState[i] == LOW)
-                    {
-                        toggleRelay(relayIndex + 1, false);
-                        Serial.printf("[2Way] CH%d toggled by SW%d\n", relayIndex + 1, i + 1);
-                    }
-                }
-
-                cloudPending[relayIndex] = true;
-            }
+            lastSwitchReading[i] = reading;
+            continue;
         }
+
+        // -------- Stable state change --------
+        if (reading != switchState[i])
+        {
+            bool previousState = switchState[i];
+            switchState[i] = reading;
+
+            int relayIndex = config.switch_to_output[i];
+            if (relayIndex < 0 || relayIndex >= MAX_CHANNELS)
+                continue;
+
+            String logic = config.switch_logic[i];
+
+            Serial.printf(
+                "[Switch] SW%d %s -> %s (logic=%s) → CH%d\n",
+                i + 1,
+                previousState == HIGH ? "HIGH" : "LOW",
+                reading == HIGH ? "HIGH" : "LOW",
+                logic.c_str(),
+                relayIndex + 1);
+
+            // ================= LOGIC HANDLING =================
+
+            // -------- TOGGLE (Latching switch) --------
+            if (logic == "toggle")
+            {
+                if (switchState[i] == LOW)
+                    toggleRelay(relayIndex + 1, false);
+            }
+            // -------- BELL (Momentary push) --------
+            if (logic == "bell")
+            {
+                static unsigned long bellOffAt[MAX_CHANNELS] = {0};
+
+                if (previousState == HIGH && reading == LOW) // press
+                {
+                    setRelay(relayIndex + 1, true, false);
+                    bellOffAt[relayIndex] = millis() + 500; // 500ms pulse
+                }
+
+                // auto-off
+                for (int j = 0; j < MAX_CHANNELS; j++)
+                {
+                    if (bellOffAt[j] && millis() > bellOffAt[j])
+                    {
+                        setRelay(j + 1, false, false);
+                        bellOffAt[j] = 0;
+                    }
+                }
+            }
+
+            // -------- PUSH (Follow switch state) --------
+            if (logic == "push")
+            {
+                bool pressed = (switchState[i] == LOW);
+
+                // RELEASED -> PRESSED  => ON
+                if (previousState == HIGH && pressed)
+                {
+                    setRelay(relayIndex + 1, true, true);
+
+                    Serial.printf(
+                        "[Push] SW%d RELEASED→PRESSED | Relay CH%d ON\n",
+                        i + 1,
+                        relayIndex + 1);
+                }
+                // PRESSED -> RELEASED  => OFF
+                else if (previousState == LOW && !pressed)
+                {
+                    setRelay(relayIndex + 1, false, true);
+
+                    Serial.printf(
+                        "[Push] SW%d PRESSED→RELEASED | Relay CH%d OFF\n",
+                        i + 1,
+                        relayIndex + 1);
+                }
+            }
+
+            // -------- 2WAY (Latching staircase) --------
+            else if (logic == "2way")
+            {
+                // Same as toggle: ANY state change
+                toggleRelay(relayIndex + 1, false);
+
+                Serial.printf(
+                    "[2Way] SW%d state change → CH%d toggled\n",
+                    i + 1, relayIndex + 1);
+            }
+
+            cloudPending[relayIndex] = true;
+        }
+
         lastSwitchReading[i] = reading;
     }
 
-    // Very small pause to let async_tcp & WiFi run for a moment.
-    // We used yield() in key places; this delay(0) is safe and non-blocking-ish.
-    delay(0);
+    // Allow background tasks
+    yield();
+
+    static bool bootCloudSyncDone = false;
+
+    if (systemState.servicesStarted && !bootCloudSyncDone)
+    {
+        for (int i = 0; i < MAX_CHANNELS; i++)
+        {
+            publishState(i + 1);
+        }
+
+        bootCloudSyncDone = true;
+        Serial.println("[BOOT] Cloud synced from saved relay state");
+    }
 }

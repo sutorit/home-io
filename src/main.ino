@@ -12,52 +12,40 @@
 #include "Utils.h"
 #include "usagesHandler.h"
 #include <Arduino.h>
+#include <Wire.h>
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
-
 
 UsageHandler usageHandler(config.acs712Pin, config.acs712Sensitivity, config.zeroCrossPin);
 bool ntpReady = false;
 
+static unsigned long lastServiceFail = 0;
+static const unsigned long SERVICE_RESTART_DELAY = 30000; // 30 sec
+
+// Main setup function runs once at startup
 void setup()
 {
   Serial.begin(115200);
   delay(1000);
-  const esp_partition_t *p = esp_ota_get_running_partition();
-  Serial.printf("Running partition: %s @ 0x%08X\n", p->label, p->address);
-  Serial.print("\n[SUTORIT ");
-  Serial.print(MAX_CHANNELS);
-  Serial.println("] Starting up...");
+  const esp_partition_t *p = esp_ota_get_running_partition();              // Get current OTA partition
+  Serial.printf("Running partition: %s @ 0x%08X\n", p->label, p->address); // Show partition info for debugging
+  Serial.print("\n[SUTORIT ");                                             // <-- fun branding :)
+  Serial.print(String(MAX_CHANNELS) + "CH");                               // <-- Show number of channels in log for easier debugging
+  Serial.println("] Starting up...");                                      // <-- Show startup message with channel count
 
+  // Check if config exists
   if (!configManager.load())
   {
-    config.OnlineStatus = "Offline";
+    config.OnlineStatus = "Offline"; // Set offline status if no config (AP mode)
     Serial.println("[CONFIG] No config found. Starting AP mode...");
-    String apName = "SUTORIT_" + String((uint32_t)ESP.getEfuseMac(), HEX).substring(4);
-    WiFi.softAP(apName.c_str(), "12345678");
-
-    Serial.print("[AP] SSID: ");
-    Serial.println(apName);
-    Serial.print("[AP] IP: ");
-    Serial.println(WiFi.softAPIP()); // <-- Show AP IP
-
-    webServer.startAPMode();
+    webServer.startAPMode(); // Stay in AP mode until config done
     Serial.println("[CONFIG] Loaded config.");
-    switchControl.begin();
-    systemState.no_config = true;
-    return; // Stay in AP mode until config done
+    switchControl.begin();        // Start switch control even in AP mode (for config purposes)
+    systemState.no_config = true; // Mark that we are in AP mode with no config
+    return;                       // Stay in AP mode until config done
   }
 
-  // if (config.mode == "master")
-  // {
-  //   Serial.println("[MODE] Master");
-  //   wifiManager.startMaster();
-  // }
-  // else if (config.mode == "slave")
-  // {
-  //   Serial.println("[MODE] Slave");
-  //   meshManager.startSlave("SUTORIT_MASTER", "12345678");
-  // }
+  // Normal startup with config
   wifiManager.startWiFi();
   webServer.startNormalMode();
   systemState.no_config = false;
@@ -73,8 +61,10 @@ void setup()
 
   initNTP();
   // usageHandler.begin();
+  Wire.begin(config.i2c_sda, config.i2c_scl); // For I2C comunications
 }
 
+// Main loop runs continuously after setup
 void loop()
 {
   // 🔹 Core loops
@@ -126,56 +116,89 @@ void loop()
   }
 
   // 🔹 Start MQTT + Firebase ONLY ONCE when internet is OK
-  if (!systemState.servicesStarted && WiFi.status() == WL_CONNECTED && internetOk)
+  if (!systemState.servicesStarted &&
+      WiFi.status() == WL_CONNECTED &&
+      internetOk &&
+      millis() - lastServiceFail > SERVICE_RESTART_DELAY)
+
   {
     // ---- MQTT ----
-    if (config.mqtt_broker.length() > 0 &&
-        config.mqtt_user.length() > 0 &&
-        config.mqtt_pass.length() > 0 &&
-        config.mqtt_port > 0)
+    if (config.mqtt_enable)
     {
-      Serial.println("[CONFIG] MQTT initialized");
-      mqttHandler.begin();
-      systemState.mqttReady = true;
+      if (config.mqtt_broker.length() > 0 &&
+          config.mqtt_user.length() > 0 &&
+          config.mqtt_pass.length() > 0 &&
+          config.mqtt_port > 0)
+      {
+        Serial.println("[CONFIG] MQTT initialized");
+        mqttHandler.begin();
+        systemState.mqttReady = true;
+      }
+      else
+      {
+        config.mqtt_enable = false; // Disable MQTT if config is incomplete
+        Serial.println("[CONFIG] MQTT config incomplete, cannot start MQTT");
+      }
     }
 
     // ---- Firebase ----
-    if (config.firebase_url.length() > 0 &&
-        config.firebase_key.length() > 0)
+    if (config.firebase_enable)
     {
-      Serial.println("[CONFIG] Firebase initialized");
-      firebaseHandler.begin();
-      systemState.firebaseReady = true;
+      if (config.firebase_url.length() > 0 &&
+          config.firebase_key.length() > 0)
+      {
+        Serial.println("[CONFIG] Firebase initialized");
+        firebaseHandler.begin();
+        systemState.firebaseReady = true;
+      }else
+      {
+        config.firebase_enable = false; // Disable Firebase if config is incomplete
+        Serial.println("[CONFIG] Firebase config incomplete, cannot start Firebase");
+      }
     }
 
     systemState.servicesStarted = true;
   }
 
-  // 🔹 Keep services running
+  // 🔹 Keep services running (SAFE)
   if (systemState.servicesStarted)
   {
+    bool serviceFailed = false;
+
+    // ---- MQTT ----
     if (systemState.mqttReady)
     {
       mqttHandler.loop();
+
       if (!mqttHandler.isReady())
       {
-        Serial.println("[MQTT] Lost connection, restarting...");
+        Serial.println("[MQTT] Lost connection");
         mqttHandler.stop();
         systemState.mqttReady = false;
-        systemState.servicesStarted = false;
+        serviceFailed = true;
       }
     }
 
+    // ---- Firebase ----
     if (systemState.firebaseReady)
     {
       firebaseHandler.loop();
+
       if (!firebaseHandler.isReady())
       {
-        Serial.println("[Firebase] Not ready, restarting...");
+        Serial.println("[Firebase] Lost connection");
         firebaseHandler.stop();
         systemState.firebaseReady = false;
-        systemState.servicesStarted = false;
+        serviceFailed = true;
       }
+    }
+
+    // ---- Handle failure ONCE ----
+    if (serviceFailed)
+    {
+      systemState.servicesStarted = false;
+      lastServiceFail = millis();
+      Serial.println("[SERVICES] Marked stopped, waiting before restart");
     }
   }
 
@@ -210,8 +233,8 @@ void loop()
 
       yield();
       delay(10);
-      WiFi.disconnect(false);
-      WiFi.reconnect();
+      // WiFi.disconnect(false);
+      // WiFi.reconnect();
 
       if (systemState.mqttReady)
       {

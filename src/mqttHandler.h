@@ -9,7 +9,7 @@ public:
   void begin();
   void loop();
   // updated: now also supports brightness (0–100)
-  void publishRelayState(uint8_t ch, bool state, int brightness = -1);
+  void publishRelayState(uint8_t ch, int value);
   void publishState(uint8_t ch);
   void stop();
   void publishAllRelayStates();

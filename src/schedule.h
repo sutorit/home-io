@@ -3,8 +3,9 @@
 
 #include <Arduino.h>
 #include <Firebase_ESP_Client.h>
+#include "configManager.h"
 
-#define MAX_CHANNELS 8
+#define MAX_SCHEDULES_PER_CHANNEL 6 // 6 schedules per channel
 
 enum ScheduleRepeat
 {
@@ -23,14 +24,13 @@ struct ScheduleItem
     bool executed = false;
     int lastExecDay = -1;
     bool recovered = false; // for missed-schedule recovery
-    String firebaseKey;  // actual node key under /schedules/
-
+    String firebaseKey;     // actual node key under /schedules/
 };
 
 class ScheduleManager
 {
 public:
-    void updateFromFirebase(int ch, FirebaseJson &json);
+    void updateFromFirebase(int ch, int index, FirebaseJson &json);
     void updateSchedulesFromFirebase(int ch, FirebaseJson &schedulesJson);
 
     void loop();
@@ -39,7 +39,8 @@ public:
     void recoverMissed();
 
 private:
-    ScheduleItem schedules[MAX_CHANNELS + 1];
+    ScheduleItem schedules[MAX_CHANNELS + 1][MAX_SCHEDULES_PER_CHANNEL];
+    int scheduleCount[MAX_CHANNELS + 1] = {0};
 
     //  helper
     bool isMissed(ScheduleItem &s, struct tm &now);

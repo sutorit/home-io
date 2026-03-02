@@ -62,7 +62,7 @@
                 <span class="toggle-password" onclick="togglePassword()">👁️</span>
             </div>
 
-            <button onclick="submitLogin()">Login</button>
+            <button onclick="submitLogin()">Reset</button>
             <button onclick="closeLogin()" class="cancel">Cancel</button>
             <p id="error" class="login-error" style="display:none;">Invalid credentials</p>
         </div>
@@ -125,10 +125,12 @@
 
 
         function submitLogin() {
-            const user = document.getElementById("username").value.trim();
+            let user = document.getElementById("username").value.trim();
             const pass = document.getElementById("password").value.trim();
             const errorMsg = document.getElementById("error");
+
             user = user.replace(/\s+/g, "").toUpperCase();
+
             if (!user || !pass) {
                 errorMsg.textContent = "Please fill both fields!";
                 errorMsg.style.display = "block";

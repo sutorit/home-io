@@ -52,14 +52,14 @@
             <input type="password" id="device_password" name="device_password" value="password" placeholder="password">
             <span class="eye-pass" data-target="device_password" aria-label="Show password" role="button">👁️</span>
           </div>
-          <label>Mode</label>
+          <!-- <label>Mode</label>
           <select name="mode" id="mode">
             <option value="master">Master</option>
             <option value="slave">Slave</option>
           </select>
 
           <label>Master IP (Slave mode)</label>
-          <input type="text" id="master_ip" name="master_ip" placeholder="192.167.25.1">
+          <input type="text" id="master_ip" name="master_ip" placeholder="192.167.25.1"> -->
         </div>
 
         <div class="config-section">
@@ -85,30 +85,58 @@
           <input type="text" id="wifi_dns" name="wifi_dns" placeholder="8.8.8.8">
         </div>
 
-        <div class="config-section">
-          <h2>Firebase Settings</h2>
-          <label>Firebase URL</label>
-          <input type="text" id="firebase_url" name="firebase_url" placeholder="https://your-project.firebaseio.com/">
+        <div class="config-section" id="firebase_section">
 
-          <label>Firebase Key</label>
-          <input type="text" id="firebase_key" name="firebase_key" placeholder="your-firebase-database-key">
+          <div class="section-header">
+            <h2>Firebase Settings</h2>
+
+            <label class="config-switch">
+              <input type="checkbox" id="firebase_toggle">
+              <span class="config-slider"></span>
+            </label>
+          </div>
+
+          <!-- IMPORTANT: wrap fields in section-body -->
+          <div class="section-body">
+            <label>Firebase URL</label>
+            <input type="text" id="firebase_url" name="firebase_url">
+
+            <label>Firebase Key</label>
+            <div class="password-wrapper">
+              <input type="password" id="firebase_key" name="firebase_key" autocomplete="current-password">
+              <span class="eye-pass" data-target="firebase_key">👁️</span>
+            </div>
+          </div>
+
         </div>
 
-        <div class="config-section">
-          <h2>MQTT Settings</h2>
-          <label>MQTT Broker</label>
-          <input type="text" id="mqtt_broker" name="mqtt_broker" placeholder="mqtt.example.com">
 
-          <label>MQTT Port</label>
-          <input type="number" id="mqtt_port" name="mqtt_port" value="1883">
+        <div class="config-section" id="mqtt_section">
+          <div class="section-header">
+            <h2>MQTT Settings</h2>
 
-          <label>MQTT Username</label>
-          <input type="text" id="mqtt_user" name="mqtt_user" placeholder="username">
+            <label class="config-switch">
+              <input type="checkbox" id="mqtt_toggle">
+              <span class="config-slider"></span>
+            </label>
+          </div>
 
-          <label>MQTT Password</label>
-          <div class="password-wrapper">
-            <input type="password" id="mqtt_pass" name="mqtt_pass" placeholder="password">
-            <span class="eye-pass" data-target="mqtt_pass" aria-label="Show MQTT password" role="button">👁️</span>
+          <div class="section-body">
+
+            <label>MQTT Broker</label>
+            <input type="text" id="mqtt_broker" name="mqtt_broker">
+
+            <label>MQTT Port</label>
+            <input type="number" id="mqtt_port" name="mqtt_port" value="1883">
+
+            <label>MQTT Username</label>
+            <input type="text" id="mqtt_user" name="mqtt_user">
+
+            <label>MQTT Password</label>
+            <div class="password-wrapper">
+              <input type="password" id="mqtt_pass" name="mqtt_pass">
+              <span class="eye-pass" data-target="mqtt_pass">👁️</span>
+            </div>
           </div>
         </div>
 
@@ -130,11 +158,53 @@
     </div>
   </main>
   <div class="footer">
-    © <script>document.write(new Date().getFullYear());</script> sutorit iot • All Rights Reserved
+    ©
+    <script>document.write(new Date().getFullYear());</script> sutorit iot • All Rights Reserved
   </div>
 
   <script src="theme.js"></script>
   <script>
+    // Section toggle logic
+    function setupLiveToggle(toggleId, sectionId, apiKey) {
+
+      const toggle = document.getElementById(toggleId);
+      const section = document.getElementById(sectionId);
+      const body = section.querySelector(".section-body");
+
+      function updateUI(state) {
+        const inputs = body.querySelectorAll("input, select");
+
+        if (state) {
+          section.classList.remove("disabled");
+          inputs.forEach(el => el.disabled = false);
+        } else {
+          section.classList.add("disabled");
+          inputs.forEach(el => el.disabled = true);
+        }
+      }
+
+      toggle.addEventListener("change", function () {
+        const state = toggle.checked;
+        updateUI(state);
+
+        fetch("/updateToggle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            key: apiKey,
+            value: state
+          })
+        });
+      });
+
+      // RETURN update function so we can call it later
+      return updateUI;
+    }
+
+    const updateFirebaseUI = setupLiveToggle("firebase_toggle", "firebase_section", "firebase_enable");
+    const updateMQTTUI = setupLiveToggle("mqtt_toggle", "mqtt_section", "mqtt_enable");
+
+    // Password visibility toggle
     document.addEventListener('click', function (e) {
       const t = e.target;
       if (t.classList && t.classList.contains('eye-pass')) {
@@ -162,8 +232,8 @@
         // Fill device settings
         document.getElementById("device_name").value = data.deviceName || "";
         document.getElementById("device_password").value = data.devicePassword || "";
-        document.getElementById("mode").value = data.mode || "master";
-        document.getElementById("master_ip").value = data.masterIP || "";
+        // document.getElementById("mode").value = data.mode || "master";
+        // document.getElementById("master_ip").value = data.masterIP || "";
 
         // Fill Wi-Fi settings
         document.getElementById("wifi_ssid").value = data.ssid || "";
@@ -174,14 +244,20 @@
         document.getElementById("wifi_dns").value = data.dns || "";
 
         // Fill MQTT settings
+        document.getElementById("mqtt_toggle").checked = data.mqttEnable || false;
         document.getElementById("mqtt_broker").value = data.mqttBroker || "";
         document.getElementById("mqtt_port").value = data.mqttPort || 1883;
         document.getElementById("mqtt_user").value = data.mqttUser || "";
         document.getElementById("mqtt_pass").value = data.mqttPass || "";
 
         // Fill Firebase settings
+        document.getElementById("firebase_toggle").checked = data.firebaseEnable || false;
         document.getElementById("firebase_url").value = data.firebaseURL || "";
         document.getElementById("firebase_key").value = data.firebaseKey || "";
+
+
+        updateMQTTUI(data.mqttEnable);
+        updateFirebaseUI(data.firebaseEnable);
 
         // Update online status
         const statusIndicator = document.getElementById("status-indicator");
@@ -282,7 +358,7 @@
 
         const logicSelect = document.createElement("select");
         logicSelect.name = "switch_logic_" + (i + 1);
-        ["toggle", "bell", "2way", "push"].forEach((t) => {
+        ["push", "bell", "toggle", "2way"].forEach((t) => {
           const opt = document.createElement("option");
           opt.value = t;
           opt.textContent = t.charAt(0).toUpperCase() + t.slice(1);

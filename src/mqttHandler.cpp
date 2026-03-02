@@ -10,178 +10,150 @@ WiFiClient espClient;
 PubSubClient client(espClient);
 MqttHandler mqttHandler;
 
-// ---------------- Global flags ----------------
-volatile bool mqttRelayPending = false;
-int mqttRelayCh = 0;
-bool mqttRelayState = false;
-volatile bool mqttBrightnessPending = false;
-int mqttBrightnessCh = 0;
-int mqttBrightnessVal = 0;
+// ---------------- Internal State ----------------
 
-// ---------------- MQTT callback ----------------
+unsigned long lastMqttReconnect = 0;
+const unsigned long mqttReconnectInterval = 5000; // 5 sec retry
+
+// ---------------- MQTT Callback ----------------
 void callback(char *topic, byte *payload, unsigned int length)
 {
+    if (length >= 255)
+        return;
+
     payload[length] = '\0';
-    String msg = String((char *)payload);
 
     StaticJsonDocument<256> doc;
-    DeserializationError error = deserializeJson(doc, msg);
-    if (error)
-    {
-        Serial.println("[MQTT] Failed to parse JSON");
+    if (deserializeJson(doc, payload))
         return;
-    }
 
-    // Ignore self-published messages
+    // Ignore self message
     String src = doc["source"] | "";
     if (src == config.device_id)
         return;
 
-    int ch = doc["ch"] | -1;
-
-    // If JSON doesn't include ch, extract from topic
-    if (ch < 1 || ch > MAX_CHANNELS)
-    {
-        String topicStr(topic);
-        int lastSlash = topicStr.lastIndexOf('/');
-        if (lastSlash >= 0)
-            ch = topicStr.substring(lastSlash + 1).toInt();
-    }
-
-    if (ch < 1 || ch > MAX_CHANNELS)
-    {
-        Serial.printf("[MQTT] Invalid channel from topic '%s'\n", topic);
+    // Extract channel from topic
+    String topicStr(topic);
+    int lastSlash = topicStr.lastIndexOf('/');
+    if (lastSlash < 0)
         return;
-    }
 
-    // --- Handle relay ---
-    if (doc.containsKey("state"))
+    int ch = topicStr.substring(lastSlash + 1).toInt();
+    if (ch < 1 || ch > MAX_CHANNELS)
+        return;
+
+    if (doc.containsKey("value"))
     {
-        String state = doc["state"].as<String>();
-        Serial.printf("[MQTT] Channel %d -> state: %s (queued)\n", ch, state.c_str());
+        int value = constrain(doc["value"], 0, 100);
 
-        mqttRelayPending = true;
-        mqttRelayCh = ch;
-        mqttRelayState = (state == "on");
-    }
+        Serial.printf("[MQTT] RX CH%d -> %d\n", ch, value);
 
-    // --- Handle brightness (separate queue) ---
-    if (doc.containsKey("brightness") && !doc.containsKey("state"))
-    {
-        int brightness = constrain(doc["brightness"], 0, 100);
-        Serial.printf("[MQTT] Channel %d -> brightness: %d (queued)\n", ch, brightness);
-
-        mqttBrightnessPending = true;
-        mqttBrightnessCh = ch;
-        mqttBrightnessVal = brightness;
+        // ONE SINGLE SOURCE OF TRUTH
+        switchControl.setBrightness(ch, value, true); // this will update relay state, publish to MQTT/Firebase, and save config
     }
 }
-
-// ---------------- MQTT handler ----------------
+// ---------------- Begin ----------------
 void MqttHandler::begin()
 {
     client.setServer(config.mqtt_broker.c_str(), config.mqtt_port);
     client.setCallback(callback);
+
+    client.setKeepAlive(15);
+    client.setSocketTimeout(3); // Prevent long blocking
 }
 
-void MqttHandler::connect()
+// ---------------- Safe Reconnect ----------------
+void handleMQTT()
 {
-    while (!client.connected())
+    if (WiFi.status() != WL_CONNECTED)
+        return;
+
+    if (client.connected())
+        return;
+
+    if (millis() - lastMqttReconnect < mqttReconnectInterval)
+        return;
+
+    lastMqttReconnect = millis();
+
+    Serial.println("[MQTT] Attempt reconnect...");
+
+    bool connected = client.connect(
+        config.device_id.c_str(),
+        config.mqtt_user.c_str(),
+        config.mqtt_pass.c_str());
+
+    if (connected)
     {
-        Serial.print("[MQTT] Connecting...");
-        if (client.connect(config.device_id.c_str(), config.mqtt_user.c_str(), config.mqtt_pass.c_str()))
-        {
-            Serial.println("connected");
+        String topic = config.device_id + "/sw/+";
+        client.subscribe(topic.c_str());
 
-            // Subscribe for all channels with wildcard
-            String topic = "sutorit/" + config.device_id + "/relay/+";
-            client.subscribe(topic.c_str());
-            Serial.print("[MQTT] Subscribed: ");
-            Serial.println(topic);
+        Serial.println("[MQTT] Reconnected OK");
 
-            // Publish all channels at startup
-            publishAllRelayStates();
-        }
-        else
-        {
-            Serial.print("failed, rc=");
-            Serial.print(client.state());
-            delay(3000);
-        }
+        mqttHandler.publishAllRelayStates();
+    }
+    else
+    {
+        Serial.print("[MQTT] Failed, rc=");
+        Serial.println(client.state());
     }
 }
 
+// ---------------- Loop ----------------
 void MqttHandler::loop()
 {
-    if (!client.connected())
-        connect();
-    client.loop();
+    handleMQTT();
 
-    // Process queued MQTT commands safely outside the callback
-    if (mqttRelayPending)
-    {
-        mqttRelayPending = false;
-        switchControl.setRelay(mqttRelayCh, mqttRelayState);
-    }
+    if (client.connected())
+        client.loop();
 
-    if (mqttBrightnessPending)
-    {
-        mqttBrightnessPending = false;
-        switchControl.setBrightness(mqttBrightnessCh, mqttBrightnessVal);
-    }
-
-    // Yield to prevent watchdog timeout
-    delay(5);
+    delay(1); // for ESP32 stability
 }
 
-// ---------------- Publish all relay states ----------------
+// ---------------- Publish All ----------------
 void MqttHandler::publishAllRelayStates()
 {
+    if (!client.connected())
+        return;
+
     for (uint8_t ch = 1; ch <= MAX_CHANNELS; ch++)
     {
-        bool state = switchControl.getState(ch);          // Getter from switchControl
-        int brightness = switchControl.getBrightness(ch); // Getter from switchControl
-        publishRelayState(ch, state, brightness);
-        delay(50);
+        int brightness = switchControl.getBrightness(ch);
+        publishRelayState(ch, brightness);
+        delay(2);
     }
 }
 
-// ---------------- Publish single relay state ----------------
-void MqttHandler::publishRelayState(uint8_t ch, bool state, int brightness)
+// ---------------- Publish Single ----------------
+void MqttHandler::publishRelayState(uint8_t ch, int value)
 {
+    if (!client.connected())
+        return;
     if (ch < 1 || ch > MAX_CHANNELS)
         return;
 
+    value = constrain(value, 0, 100);
+
     StaticJsonDocument<128> doc;
     doc["ch"] = ch;
-    doc["state"] = state ? "on" : "off";
-
-    if (brightness >= 0 && brightness <= 100)
-        doc["brightness"] = brightness;
-
+    doc["value"] = value;
     doc["source"] = config.device_id;
 
     char buffer[128];
     serializeJson(doc, buffer);
 
-    String topic = "sutorit/" + config.device_id + "/relay/" + String(ch);
+    String topic = config.device_id + "/sw/" + String(ch);
 
-    // Only debug on Serial
-    Serial.print("[MQTT] Publishing topic: ");
-    Serial.print(topic);
-    Serial.print(" | Payload: ");
-    Serial.println(buffer);
+    client.publish(topic.c_str(), buffer, true);
 
-    client.publish(topic.c_str(), buffer, true); // retain = true
+    Serial.printf("[MQTT] Published CH%d -> %d\n", ch, value);
 }
 
-// ---------------- Stop MQTT ----------------
+// ---------------- Stop ----------------
 void MqttHandler::stop()
 {
     if (client.connected())
         client.disconnect();
-
-    Serial.println("[MQTT] Stopped");
 }
 
 bool MqttHandler::isReady()

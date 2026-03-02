@@ -1361,3 +1361,64 @@ input::placeholder {
     opacity: 1;
   }
 }
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Toggle config-switch */
+.config-switch {
+  position: relative;
+  display: inline-block;
+  width: 46px;
+  height: 24px;
+}
+
+.config-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.config-slider {
+  position: absolute;
+  cursor: pointer;
+  background-color: #d50000;
+  border-radius: 34px;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  transition: 0.4s;
+}
+
+.config-slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  border-radius: 50%;
+  transition: 0.4s;
+}
+
+.config-switch input:checked + .config-slider {
+  background-color: #00c853;
+}
+
+.config-switch input:checked + .config-slider:before {
+  transform: translateX(22px);
+}
+
+/* Disabled Section */
+.config-section.disabled {
+  opacity: 0.5;
+}
+
+.config-section.disabled input {
+  pointer-events: none;
+}

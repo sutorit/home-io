@@ -24,6 +24,13 @@
             <img src="sutorit.png" alt="Logo">
         </div>
     </header>
+
+    <!--  Status Indicator -->
+    <div id="status-wrapper">
+        <div id="status-indicator" class="status offline"></div>
+        <span id="status-text">Checking...</span>
+    </div>
+
     <!-- UPDATE POPUP -->
     <div id="updatePopup" class="update-overlay">
         <div class="update-card">
@@ -37,7 +44,7 @@
                 <div class="percent-text" id="percentText">0%</div>
 
                 <!-- SUCCESS -->
-                <div class="done-check" id="doneCheck">✓</div>
+                <div class="done-check" id="doneCheck" style="color: greenyellow;">✓</div>
 
                 <!-- FAILURE -->
                 <div class="fail-cross" id="failCross">✕</div>
@@ -76,7 +83,7 @@
                 <p>Toggle between Light and Dark modes.</p>
             </div>
             <!-- Update Section -->
-            <div class="config-section">
+            <div class="config-section" id="update-section">
                 <h2>UPDATE</h2>
                 <button class="update-btn" onclick="checkUpdate()">
                     Check for Updates
@@ -241,7 +248,7 @@
                 .then(d => {
                     setProgress(d.progress);
 
-                    if (!d.running && d.progress >= 99) {
+                    if (d.progress >= 99) {
                         clearInterval(timer);
                         finish();
                     }
@@ -252,27 +259,31 @@
             clearInterval(timer);
 
             const wrap = document.querySelector('.circle-wrap');
+            const percent = document.getElementById('percentText');
+            const done = document.getElementById('doneCheck');
+            const fail = document.getElementById('failCross');
 
-            // REMOVE other states
+            // Remove failure state if any
             wrap.classList.remove('failed');
 
-            // ADD SUCCESS STATE
-            wrap.classList.add('success');
-
-            // Safety hide %
-            const percent = document.getElementById('percentText');
+            // Hide percent text
             percent.style.display = 'none';
 
+            // Show ✅ check icon
+            done.style.display = 'flex';
+            fail.style.display = 'none';
+
+            // Update text
             document.getElementById('updateTitle').innerText = "Update Complete";
             document.getElementById('updateTitle').classList.remove('update-failed');
             document.getElementById('updateTitle').classList.add('update-success');
 
-            document.getElementById('updateDesc').innerText = "Restarting…";
+            document.getElementById('updateDesc').innerText = "Rebooting device...";
 
-            // Redirect after reboot
+            // Wait before redirecting to allow users to see the success state
             setTimeout(() => {
                 window.location.replace("/");
-            }, 2500);
+            }, 2000); // 2 seconds
         }
 
 
@@ -305,6 +316,70 @@
                 closeUpdatePopup();
             }
         });
+
+    </script>
+    <script>
+        window.addEventListener("load", async () => {
+            try {
+                const res = await fetch("/getConfig", { cache: "no-store" }); // prevent old cached result
+                const data = await res.json();
+
+                const statusIndicator = document.getElementById("status-indicator");
+                const updateSection = document.getElementById("update-section");
+                const statusText = document.getElementById("status-text");
+                const onlineStatus = data.onlineStatus || "Offline";
+
+                if (onlineStatus.toLowerCase() === "online") {
+                    statusIndicator.classList.remove("offline");
+                    statusIndicator.classList.add("online");
+                    statusText.textContent = "Online";
+                    statusText.style.color = "#00c853"; // green
+                    updateSection.style.display = "block"; // Enable update section when online
+                } else {
+                    statusIndicator.classList.remove("online");
+                    statusIndicator.classList.add("offline");
+                    statusText.textContent = "Offline";
+                    statusText.style.color = "#d50000"; // red
+                    updateSection.style.display = "none"; // Disable update section when offline
+                }
+            } catch (err) {
+                console.error("Failed to load status", err);
+
+                // fallback: mark as offline
+                const statusIndicator = document.getElementById("status-indicator");
+                const statusText = document.getElementById("status-text");
+                statusIndicator.classList.remove("online");
+                statusIndicator.classList.add("offline");
+                statusText.textContent = "Offline";
+                statusText.style.color = "#d50000";
+            }
+        });
+
+        async function updateStatus() {
+            try {
+                const res = await fetch("/getConfig");
+                const data = await res.json();
+
+                const statusIndicator = document.getElementById("status-indicator");
+                const statusText = document.getElementById("status-text");
+                const onlineStatus = data.onlineStatus || "Offline";
+
+                if (onlineStatus.toLowerCase() === "online") {
+                    statusIndicator.classList.remove("offline");
+                    statusIndicator.classList.add("online");
+                    statusText.textContent = "Online";
+                } else {
+                    statusIndicator.classList.remove("online");
+                    statusIndicator.classList.add("offline");
+                    statusText.textContent = "Offline";
+                }
+            } catch (err) {
+                console.warn("Status update failed", err);
+            }
+        }
+
+        // Call every 10 seconds
+        setInterval(updateStatus, 10000);
 
     </script>
 </body>

@@ -6,7 +6,7 @@
 
 ScheduleManager schedulemanager;
 
-void ScheduleManager::updateFromFirebase(int ch, FirebaseJson &json)
+void ScheduleManager::updateFromFirebase(int ch, int index, FirebaseJson &json)
 {
     FirebaseJsonData dTest;
     // Ignore value-only updates ONLY when schedule is disabled
@@ -14,7 +14,7 @@ void ScheduleManager::updateFromFirebase(int ch, FirebaseJson &json)
         !json.get(dTest, "time") &&
         !json.get(dTest, "repeat") &&
         !json.get(dTest, "schedule_value") &&
-        schedules[ch].enabled)
+        schedules[ch][index].enabled)
     {
 
         Serial.printf("[SCH IGNORE] CH%d value-only (no schedule)\n", ch);
@@ -25,14 +25,14 @@ void ScheduleManager::updateFromFirebase(int ch, FirebaseJson &json)
         return;
 
     FirebaseJsonData d;
-    ScheduleItem &s = schedules[ch];
+    ScheduleItem &s = schedules[ch][index];
 
     bool scheduleChanged = false;
 
     Serial.printf("\n[SCH RX] Firebase update for CH%d\n", ch);
 
     // -------- scheduleId --------
-    if (json.get(d, "id")) // 🔥 FIXED
+    if (json.get(d, "id")) // FIXED
     {
         if (s.scheduleId != d.stringValue)
         {
@@ -152,51 +152,51 @@ void ScheduleManager::updateSchedulesFromFirebase(int ch, FirebaseJson &schedule
     if (ch < 1 || ch > MAX_CHANNELS)
         return;
 
+    scheduleCount[ch] = 0;
+
     FirebaseJsonData d;
     size_t count = schedulesJson.iteratorBegin();
 
-    Serial.printf("\n[SCH MULTI RX] CH%d schedules=%d\n", ch, count);
-
-    bool applied = false;
+    Serial.printf("\n[SCH MULTI RX] CH%d total=%d\n", ch, count);
 
     for (size_t i = 0; i < count; i++)
     {
+        if (scheduleCount[ch] >= MAX_SCHEDULES_PER_CHANNEL)
+            break;
+
         int type;
         String key;
-        String raw; // ← raw JSON text
+        String raw;
 
         schedulesJson.iteratorGet(i, type, key, raw);
 
         if (type != FirebaseJson::JSON_OBJECT)
             continue;
 
-        // Parse child schedule object
         FirebaseJson oneSchedule;
         oneSchedule.setJsonData(raw);
 
-        // Check enable
         if (!oneSchedule.get(d, "enable") || d.intValue != 1)
             continue;
 
-        // ✅ APPLY FIRST ENABLED SCHEDULE
-        schedules[ch].firebaseKey = key; // 🔥 STORE REAL KEY
-        updateFromFirebase(ch, oneSchedule);
+        int idx = scheduleCount[ch];
 
-        applied = true;
+        schedules[ch][idx].firebaseKey = key;
 
-        Serial.printf("[SCH ACTIVE] CH%d -> %s\n", ch, key.c_str());
-        break; // 🔥 ONLY ONE ACTIVE SCHEDULE
+        // ✅ USE updateFromFirebase
+        updateFromFirebase(ch, idx, oneSchedule);
+
+        Serial.printf("[SCH LOADED] CH%d #%d -> %s\n",
+                      ch, idx, key.c_str());
+
+        scheduleCount[ch]++;
     }
 
     schedulesJson.iteratorEnd();
 
-    if (!applied)
-    {
-        schedules[ch].enabled = false;
+    if (scheduleCount[ch] == 0)
         Serial.printf("[SCH NONE] CH%d no active schedules\n", ch);
-    }
 }
-
 void ScheduleManager::recoverMissed()
 {
     time_t nowT = time(nullptr);
@@ -207,70 +207,71 @@ void ScheduleManager::recoverMissed()
 
     for (int ch = 1; ch <= MAX_CHANNELS; ch++)
     {
-        ScheduleItem &s = schedules[ch];
-
-        if (!s.enabled || s.recovered)
-            continue;
-
-        if (!isMissed(s, now))
-            continue;
-
-        // ---------- ONCE ----------
-        if (s.repeat == REPEAT_ONCE && !s.executed)
+        for (int i = 0; i < scheduleCount[ch]; i++)
         {
-            Serial.printf("[MISS] ONCE CH%d\n", ch);
-        }
-        // ---------- DAILY ----------
-        else if (s.repeat == REPEAT_DAILY && s.lastExecDay != now.tm_yday)
-        {
-            Serial.printf("[MISS] DAILY CH%d\n", ch);
-        }
-        // ---------- WEEKLY ----------
-        else if (s.repeat == REPEAT_WEEKLY &&
-                 (now.tm_yday - s.lastExecDay) >= 7)
-        {
-            Serial.printf("[MISS] WEEKLY CH%d\n", ch);
-        }
-        else
-        {
-            s.recovered = true;
-            continue;
-        }
+            ScheduleItem &s = schedules[ch][i];
 
-        // FIRE MISSED SCHEDULE
-        Serial.printf("[SCH RECOVER FIRE] CH%d -> %d%% \n",
-                      ch, s.scheduleValue);
+            if (!s.enabled || s.recovered)
+                continue;
 
-        switchControl.setRelay(ch, s.scheduleValue > 0, false);
-        switchControl.setBrightness(ch, s.scheduleValue, false);
+            if (!isMissed(s, now))
+                continue;
 
-        s.executed = true;
-        s.lastExecDay = now.tm_yday;
-        s.recovered = true;
+            bool shouldFire = false;
 
-        Firebase.RTDB.setInt(
-            &fbdo,
-            "/Home/" + config.device_id +
-                "/switches/sw" + String(ch) + "/value",
-            s.scheduleValue);
+            // ---------- ONCE ----------
+            if (s.repeat == REPEAT_ONCE && !s.executed)
+                shouldFire = true;
 
-        // Clear ONCE
-        if (s.repeat == REPEAT_ONCE && s.firebaseKey.length())
-        {
-            String path =
-                "/Home/" + config.device_id +
-                "/switches/sw" + String(ch) +
-                "/schedules/" + s.firebaseKey;
+            // ---------- DAILY ----------
+            else if (s.repeat == REPEAT_DAILY &&
+                     s.lastExecDay != now.tm_yday)
+                shouldFire = true;
 
-            if (deleteFirebasePath(path))
+            // ---------- WEEKLY ----------
+            else if (s.repeat == REPEAT_WEEKLY &&
+                     (now.tm_yday - s.lastExecDay) >= 7)
+                shouldFire = true;
+
+            if (!shouldFire)
             {
-                s.enabled = false;
-                s.executed = true;
-                s.firebaseKey = "";
-                s.scheduleId = "";
                 s.recovered = true;
+                continue;
+            }
 
-                Serial.printf("[SCH CLEAR] CH%d ONCE deleted\n", ch);
+            // 🔥 FIRE MISSED SCHEDULE
+            Serial.printf("[SCH RECOVER FIRE] CH%d #%d -> %d%%\n",
+                          ch, i, s.scheduleValue);
+
+            switchControl.setRelay(ch, s.scheduleValue > 0, false);
+            switchControl.setBrightness(ch, s.scheduleValue, false);
+
+            s.executed = true;
+            s.lastExecDay = now.tm_yday;
+            s.recovered = true;
+
+            Firebase.RTDB.setInt(
+                &fbdo,
+                "/Home/" + config.device_id +
+                    "/switches/sw" + String(ch) + "/value",
+                s.scheduleValue);
+
+            // ---------- CLEAR ONCE ----------
+            if (s.repeat == REPEAT_ONCE && s.firebaseKey.length())
+            {
+                String path =
+                    "/Home/" + config.device_id +
+                    "/switches/sw" + String(ch) +
+                    "/schedules/" + s.firebaseKey;
+
+                if (deleteFirebasePath(path))
+                {
+                    s.enabled = false;
+                    s.firebaseKey = "";
+                    s.scheduleId = "";
+
+                    Serial.printf("[SCH CLEAR] CH%d #%d ONCE deleted\n", ch, i);
+                }
             }
         }
     }
@@ -295,77 +296,68 @@ void ScheduleManager::loop()
     char nowStr[6];
     sprintf(nowStr, "%02d:%02d", t.tm_hour, t.tm_min);
 
-    // Serial.printf("\n[TIME] %s | Day=%d\n", nowStr, t.tm_yday);
-
     for (int ch = 1; ch <= MAX_CHANNELS; ch++)
     {
-        ScheduleItem &s = schedules[ch];
-
-        // Serial.printf("[CHK] CH%d en=%d time=%s val=%d exec=%d\n",
-        //               ch, s.enabled, s.time.c_str(),
-        //               s.scheduleValue, s.executed);
-
-        if (!s.enabled)
-            continue;
-        if (s.time.length() != 5)
-            continue;
-        if (s.scheduleValue < 0)
-            continue;
-
-        // ONCE
-        if (s.repeat == REPEAT_ONCE && s.executed)
+        for (int i = 0; i < scheduleCount[ch]; i++)
         {
-            Serial.printf("[SKIP] CH%d already executed (ONCE)\n", ch);
-            continue;
-        }
+            ScheduleItem &s = schedules[ch][i];
 
-        // DAILY / WEEKLY
-        if ((s.repeat == REPEAT_DAILY || s.repeat == REPEAT_WEEKLY) &&
-            s.executed && s.lastExecDay == t.tm_yday)
-        {
-            Serial.printf("[SKIP] CH%d already ran today\n", ch);
-            continue;
-        }
+            if (!s.enabled)
+                continue;
+            if (s.time.length() != 5)
+                continue;
+            if (s.scheduleValue < 0)
+                continue;
 
-        if (String(nowStr) == s.time)
-        {
-            Serial.printf("\n[SCH FIRE] CH%d -> %d%% \n",
-                          ch, s.scheduleValue);
+            // ---------- ONCE ----------
+            if (s.repeat == REPEAT_ONCE && s.executed)
+                continue;
 
-            // Apply hardware
-            switchControl.setRelay(ch, s.scheduleValue > 0, false);
-            switchControl.setBrightness(ch, s.scheduleValue, false);
+            // ---------- DAILY ----------
+            if (s.repeat == REPEAT_DAILY &&
+                s.executed && s.lastExecDay == t.tm_yday)
+                continue;
 
-            // Lock execution BEFORE Firebase
-            s.executed = true;
-            s.lastExecDay = t.tm_yday;
+            // ---------- WEEKLY ----------
+            if (s.repeat == REPEAT_WEEKLY &&
+                s.executed && s.lastExecDay == t.tm_yday)
+                continue;
 
-            // Write ONLY value (NO schedule fields)
-            Firebase.RTDB.setInt(
-                &fbdo,
-                "/Home/" + config.device_id +
-                    "/switches/sw" + String(ch) + "/value",
-                s.scheduleValue);
-
-            Serial.printf("[SCH FB] CH%d value written\n", ch);
-
-            // Cleanup ONCE
-            if (s.repeat == REPEAT_ONCE && s.firebaseKey.length())
+            // ---------- TIME MATCH ----------
+            if (String(nowStr) == s.time)
             {
-                String path =
+                Serial.printf("\n[SCH FIRE] CH%d #%d -> %d%%\n",
+                              ch, i, s.scheduleValue);
+
+                switchControl.setRelay(ch, s.scheduleValue > 0, false);
+                switchControl.setBrightness(ch, s.scheduleValue, false);
+
+                s.executed = true;
+                s.lastExecDay = t.tm_yday;
+
+                Firebase.RTDB.setInt(
+                    &fbdo,
                     "/Home/" + config.device_id +
-                    "/switches/sw" + String(ch) +
-                    "/schedules/" + s.firebaseKey;
+                        "/switches/sw" + String(ch) + "/value",
+                    s.scheduleValue);
 
-                if (deleteFirebasePath(path))
+                // ---------- CLEAR ONCE ----------
+                if (s.repeat == REPEAT_ONCE && s.firebaseKey.length())
                 {
-                    s.enabled = false;
-                    s.executed = true;
-                    s.firebaseKey = "";
-                    s.scheduleId = "";
-                    s.recovered = true;
+                    String path =
+                        "/Home/" + config.device_id +
+                        "/switches/sw" + String(ch) +
+                        "/schedules/" + s.firebaseKey;
 
-                    Serial.printf("[SCH CLEAR] CH%d ONCE deleted\n", ch);
+                    if (deleteFirebasePath(path))
+                    {
+                        s.enabled = false;
+                        s.firebaseKey = "";
+                        s.scheduleId = "";
+                        s.recovered = true;
+
+                        Serial.printf("[SCH CLEAR] CH%d #%d ONCE deleted\n", ch, i);
+                    }
                 }
             }
         }

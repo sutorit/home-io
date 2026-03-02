@@ -17,8 +17,82 @@ FirebaseHandler firebaseHandler;
 #define GMT_OFFSET_SEC 19800 // +5:30
 #define DAYLIGHT_OFFSET_SEC 0
 
+bool bootSyncDone = false;
+
+void FirebaseHandler::syncSwitchFromFirebase(uint8_t ch)
+{
+    if (ch < 1 || ch > MAX_CHANNELS)
+        return;
+
+    int idx = ch - 1;
+
+    String path = "/Home/" + config.device_id +
+                  "/switches/sw" + String(ch) + "/value";
+
+    if (!Firebase.RTDB.getInt(&fbdo, path.c_str()))
+    {
+        // Serial.printf("[BOOT SYNC] CH%d skipped (no Firebase value)\n", ch);
+        return;
+    }
+
+    int fbValue = constrain(fbdo.intData(), 0, 100);
+
+    // CRITICAL RULE:
+    // Never force OFF at boot
+    if (fbValue == 0)
+    {
+        // Serial.printf(
+        //     "[BOOT SYNC] CH%d Firebase=0 → ignored (local=%s)\n",
+        //     ch,
+        //     config.output_state[idx] ? "ON" : "OFF");
+        return;
+    }
+
+    // Only apply brightness if relay is already ON locally
+    if (config.output_state[idx] || switchControl.getState(ch))
+    {
+        // switchControl.setRelay(ch, fbValue > 0, false);
+        switchControl.setBrightness(ch, fbValue, false); // this will update relay state but NOT publish to Firebase again (avoid loop)
+
+        Serial.printf(
+            "[BOOT SYNC] CH%d brightness restored → %d%%\n",
+            ch, fbValue);
+    }
+    else
+    {
+        Serial.printf(
+            "[BOOT SYNC] CH%d skipped (relay OFF locally)\n",
+            ch);
+    }
+}
+
+void FirebaseHandler::syncSchedulesFromFirebase(uint8_t ch)
+{
+    String schedPath =
+        "/Home/" + config.device_id +
+        "/switches/sw" + String(ch) + "/schedules";
+
+    if (!Firebase.RTDB.getJSON(&fbdo, schedPath.c_str()))
+    {
+        // Serial.printf("[BOOT SCH SYNC] CH%d no schedules\n", ch);
+        return;
+    }
+
+    FirebaseJson &schedJson = fbdo.jsonObject();   // ✅ REFERENCE, not copy
+
+    schedulemanager.updateSchedulesFromFirebase(ch, schedJson);
+
+    // Serial.printf("[BOOT SCH SYNC] CH%d schedules loaded\n", ch);
+}
+
 void streamCallback(FirebaseStream data)
 {
+    if (!bootSyncDone)
+    {
+        Serial.println("[Firebase] Ignoring stream during boot sync");
+        return;
+    }
+
     String path = data.dataPath();
     Serial.printf("[Firebase] Stream update at path: %s\n", path.c_str());
 
@@ -56,8 +130,8 @@ void streamCallback(FirebaseStream data)
         int value = data.intData();
         value = constrain(value, 0, 100);
 
-        switchControl.setRelay(ch, value > 0, false);
-        switchControl.setBrightness(ch, value, false);
+        // switchControl.setRelay(ch, value > 0, false); // value > 0 means ON, else OFF
+        switchControl.setBrightness(ch, value, false); // this will update relay state but NOT publish to Firebase again (avoid loop)
 
         Serial.printf("[Firebase] Relay CH%d -> %d%%\n", ch, value);
         return;
@@ -81,11 +155,11 @@ void streamCallback(FirebaseStream data)
         }
         return;
     }
-    else
-    {
-        Serial.printf("[Firebase] Failed to sync CH%d -> %s\n",
-                      ch, fbdo.errorReason().c_str());
-    }
+    // else
+    // {
+    //     Serial.printf("[Firebase] Failed to sync CH%d -> %s\n",
+    //                   ch, fbdo.errorReason().c_str());
+    // }
 }
 
 // Timeout callback: called if stream times out
@@ -105,6 +179,7 @@ void FirebaseHandler::begin()
     // --- 1️⃣ Ensure NTP time is synced before TLS ---
     configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC,
                "pool.ntp.org", "time.nist.gov");
+
     Serial.print("[Time] Syncing NTP");
     while (time(nullptr) < 100000)
     {
@@ -118,36 +193,54 @@ void FirebaseHandler::begin()
     fbConfig.signer.tokens.legacy_token = config.firebase_key.c_str();
 
     // --- 3️⃣ Optimize memory & connection behavior ---
-    fbConfig.timeout.serverResponse = 10 * 1000; // 10 sec timeout
-    fbConfig.fcs.download_buffer_size = 2048;    // smaller buffer to reduce RAM
+    fbConfig.timeout.serverResponse = 10 * 1000;
+    fbConfig.fcs.download_buffer_size = 2048;
     fbConfig.max_token_generation_retry = 3;
-    fbConfig.cert.data = nullptr; // use internal root cert
+    fbConfig.cert.data = nullptr;
     Firebase.reconnectWiFi(true);
 
-    // Optional: log memory
     Serial.printf("[Heap before Firebase] %lu bytes free\n", ESP.getFreeHeap());
 
     // --- 4️⃣ Begin Firebase connection ---
     Firebase.begin(&fbConfig, &auth);
 
-    // --- 5️⃣ Setup RTDB stream ---
+    // ✅ WAIT until Firebase is fully ready
+    Serial.print("[Firebase] Waiting for ready");
+    while (!Firebase.ready())
+    {
+        Serial.print(".");
+        delay(200);
+    }
+    Serial.println(" OK");
+
+    // --- 5️⃣ BOOT SYNC FIRST (NO STREAM YET) ---
+    Serial.println("[Firebase] Restoring last switch states...");
+    for (int i = 1; i <= MAX_CHANNELS; i++)
+    {
+        delay(200);
+        syncSwitchFromFirebase(i);    // Sync switch state first (fast path)
+        syncSchedulesFromFirebase(i); // Then sync schedules (slower, but less critical for boot)
+    }
+
+    bootSyncDone = true;
+    schedulemanager.recoverMissed();  // Check for any missed schedules during boot
+    Serial.println("[Firebase] Boot sync completed");
+
+    // --- 6️⃣ START RTDB STREAM AFTER BOOT SYNC ---
     String streamPath = "/Home/" + config.device_id;
     if (!Firebase.RTDB.beginStream(&fbStream, streamPath.c_str()))
     {
-        Serial.printf("[Firebase] Stream begin error: %s\n", fbStream.errorReason().c_str());
+        Serial.printf("[Firebase] Stream begin error: %s\n",
+                      fbStream.errorReason().c_str());
     }
     else
     {
-        Firebase.RTDB.setStreamCallback(&fbStream, streamCallback, streamTimeoutCallback);
-        Serial.println("[Firebase] Listening at " + streamPath);
-    }
+        Firebase.RTDB.setStreamCallback(
+            &fbStream,
+            streamCallback,
+            streamTimeoutCallback);
 
-    // --- 6️⃣ Initial relay sync (delayed, one by one) ---
-    for (int i = 1; i <= MAX_CHANNELS; i++)
-    {
-        delay(300); // short delay between writes
-        // sendRelayState(i, 0, false, "", false);
-        sendBootValueOnly(i);
+        Serial.println("[Firebase] Stream listening at " + streamPath);
     }
 
     // --- 7️⃣ Send device info ---
@@ -163,15 +256,15 @@ void FirebaseHandler::begin()
     Serial.println("[Firebase] Initialization complete.");
 }
 
-void FirebaseHandler::sendBootValueOnly(uint8_t ch)
-{
-    String path = "/Home/" + config.device_id + "/switches/sw" + String(ch);
+// void FirebaseHandler::sendBootValueOnly(uint8_t ch)
+// {
+//     String path = "/Home/" + config.device_id + "/switches/sw" + String(ch);
 
-    FirebaseJson json;
-    json.set("value", 0);
+//     FirebaseJson json;
+//     json.set("value", 0);
 
-    Firebase.RTDB.updateNode(&fbWrite, path.c_str(), &json);
-}
+//     Firebase.RTDB.updateNode(&fbWrite, path.c_str(), &json);
+// }
 
 // Definition in firebaseHandler.cpp
 void FirebaseHandler::sendRelayState(uint8_t ch, int value)
@@ -181,7 +274,6 @@ void FirebaseHandler::sendRelayState(uint8_t ch, int value)
     // Build JSON for the switch
     FirebaseJson json;
     json.set("value", constrain(value, 0, 100));
-  
 
     // Debug log
     Serial.printf("[DEBUG] SW%d -> Value: %d\n",

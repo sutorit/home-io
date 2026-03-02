@@ -54,3 +54,16 @@ pio run -t upload -e esp32dev
 ## upload firmware
 gh release create v0.10.1.6 .pio/build/esp32dev/firmware.bin
   --notes "Stable OTA firmware"
+
+# change reposity from git
+git remote -v
+git remote remove origin
+git remote add origin https://github.com/sutorit/home-io.git
+
+# update git
+git add . 
+git commit -m "Update project files" 
+
+# Mqtt Test our PC
+mosquitto -v -c "D:\Programes\Mosquitto\mosquitto.conf"
+then run command: mosquitto_pub -h 192.168.29.165 -p 1883 -u USERNAME -P PASSWORD -t "DEVICE_ID/sw/1" -m '{"value":100}'

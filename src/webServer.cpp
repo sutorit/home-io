@@ -11,6 +11,8 @@
 #include "systemState.h"
 #include "usagesHandler.h"
 #include "updateCheck.h"
+#include "firebaseHandler.h"
+#include "mqttHandler.h"
 
 extern UsageHandler usageHandler;
 
@@ -159,7 +161,7 @@ void WebServer::registerRoutes()
             // Output mapping (OUTPUT 1, OUTPUT 2, etc.)
             String outputParam = "switch_output_" + String(i + 1);
             if (req->hasParam(outputParam, true)) {
-                config.switch_to_output[i] = req->getParam(outputParam, true)->value().toInt();
+                config.switch_to_output[i] = req->getParam(outputParam, true)->value().toInt() - 1; // convert 1-based to 0-based
             }
 
             // AC/DC type (ac or dc)
@@ -185,7 +187,110 @@ void WebServer::registerRoutes()
     req->redirect("/");
     rebootDevice(); });
 
-    // Get current config (for config page)
+    // Toggle updates (for MQTT/Firebase toggles on config page)
+    server.on("/updateToggle", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+              {
+                  StaticJsonDocument<256> doc;
+                  DeserializationError error = deserializeJson(doc, data);
+
+                  if (error)
+                  {
+                      request->send(400, "application/json", "{\"status\":\"error\"}");
+                      return;
+                  }
+
+                  String key = doc["key"] | "";
+                  bool value = doc["value"] | false;
+
+                  bool changed = false;
+
+                  // ================= FIREBASE =================
+                  if (key == "firebase_enable")
+                  {
+                      if (config.firebase_enable != value)
+                      {
+                          config.firebase_enable = value;
+                          changed = true;
+
+                          Serial.println("[Firebase] " + String(value ? "Enabled" : "Disabled"));
+
+                          // if (value)
+                          // {
+                          //     if (config.firebase_url.length() > 0 &&
+                          //         config.firebase_key.length() > 0)
+                          //     {
+                          //         if (!firebaseHandler.isReady())
+                          //             firebaseHandler.begin();
+                          //     }
+                          //     else
+                          //     {
+                          //         Serial.println("[Firebase] Config incomplete");
+                          //     }
+                          // }
+                          // else
+                          // {
+                          //     firebaseHandler.stop();
+                          // }
+                      }
+                  }
+
+                  // ================= MQTT =================
+                  if (key == "mqtt_enable")
+                  {
+                      if (config.mqtt_enable != value)
+                      {
+                          config.mqtt_enable = value;
+                          changed = true;
+
+                          Serial.println("[MQTT] " + String(value ? "Enabled" : "Disabled"));
+
+                          // if (value)
+                          // {
+                          //     if (config.mqtt_broker.length() > 0 &&
+                          //         config.mqtt_user.length() > 0 &&
+                          //         config.mqtt_pass.length() > 0 &&
+                          //         config.mqtt_port > 0)
+                          //     {
+                          //         if (!mqttHandler.isReady())
+                          //             mqttHandler.begin();
+                          //     }
+                          //     else
+                          //     {
+                          //         Serial.println("[MQTT] Config incomplete");
+                          //     }
+                          // }
+                          // else
+                          // {
+                          //     mqttHandler.stop();
+                          // }
+                      }
+                  }
+
+                  // Save only if changed
+                  if (changed)
+                  {
+                      if (configManager.save())
+                          Serial.println("[CONFIG] Toggle state saved");
+                      else
+                          Serial.println("[CONFIG] Failed to save toggle");
+                  }
+
+                  request->send(200, "application/json", "{\"status\":\"ok\"}");
+
+                    if (key == "firebase_enable"){
+                        if (config.firebase_url.length() > 0 && config.firebase_key.length() > 0) 
+                        {
+                            rebootDevice();
+                        } 
+                    } 
+                    if (key == "mqtt_enable")  
+                    { if (config.mqtt_broker.length() > 0 && config.mqtt_user.length() > 0 && config.mqtt_pass.length() > 0 && config.mqtt_port > 0)
+                    {
+                        rebootDevice(); 
+                    } 
+                } });
+
+    // Get current config (for populating config page)
     server.on("/getConfig", HTTP_GET, [](AsyncWebServerRequest *req)
               {
     DynamicJsonDocument doc(2048);
@@ -205,20 +310,27 @@ void WebServer::registerRoutes()
     doc["password"]         = config.wifi_password;
 
     // MQTT config
+    doc["mqttEnable"]       = config.mqtt_enable;     
     doc["mqttBroker"]       = config.mqtt_broker;
     doc["mqttPort"]         = config.mqtt_port;
     doc["mqttUser"]         = config.mqtt_user;
     doc["mqttPass"]         = config.mqtt_pass;
 
     // Firebase config
+    doc["firebaseEnable"]   = config.firebase_enable; 
     doc["firebaseURL"]      = config.firebase_url;
     doc["firebaseKey"]      = config.firebase_key;
+
+  
+        
+    
 
     // Status
     doc["onlineStatus"]    = config.OnlineStatus;
 
     // Firmware version
-    doc["firmwareVersion"]  = String(FIRMWARE_VERSION); // Update this when releasing new firmware!
+    doc["firmwareVersion"]  = config.firmware_version; // Update this when releasing new firmware!
+    doc["lastReleaseNotes"] = config.last_release_notes.length() > 0 ? config.last_release_notes : "New Device Check Updates"; // Update this when releasing new firmware!
 
     // Uptime calculation
     unsigned long ms = millis();
@@ -381,14 +493,69 @@ void relayTask(void *param)
     }
 }
 
+// Sanitize device name for mDNS (lowercase, no spaces, only alphanumeric, - and _ allowed)
+String sanitizeName(String name)
+{
+    String clean = "";
+
+    for (size_t i = 0; i < name.length(); i++)
+    {
+        char c = name[i];
+
+        if (isalnum(c))
+        {
+            clean += (char)tolower(c); // force char
+        }
+    }
+
+    return clean;
+}
+
 // AP mode
 void WebServer::startAPMode()
 {
-    SPIFFS.begin(true);
-    Serial.println("[AP] Server Started");
-    dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+    Serial.println("[AP] Starting Access Point...");
+
+    // Start AP
+    WiFi.mode(WIFI_AP);
+    String apName = config.device_name;         // Use device name as AP SSID for easier identification
+    String apPassword = config.device_password; // Use device password for AP as well (or set a default one)
+    WiFi.softAP(apName.c_str(), apPassword.c_str());
+
+    // Check if AP started successfully
+    if (!WiFi.softAP(apName.c_str(), apPassword.c_str()))
+    {
+        Serial.println("[AP] Failed to start!");
+        return;
+    }
+
+    IPAddress ip = WiFi.softAPIP();
+    Serial.print("[AP] SSID: ");
+    Serial.println(apName);
+    Serial.print("[AP] IP: ");
+    Serial.println(WiFi.softAPIP()); // <-- Show AP IP
+
+    // Start DNS (Captive Portal)
+    dnsServer.start(DNS_PORT, "*", ip);
+
+    // Refine name for mDNS
+    String refineDeviceName = sanitizeName(config.device_name);
+
+    // Start mDNS (may not work in pure AP mode)
+    if (MDNS.begin(refineDeviceName.c_str()))
+    {
+        Serial.println("[MDNS] http://" + WiFi.softAPIP().toString());
+        Serial.println("[MDNS] http://" + refineDeviceName + ".local (if supported)");
+    }
+    else
+    {
+        Serial.println("[MDNS] Failed to start");
+    }
+
     registerRoutes();
     server.begin();
+
+    Serial.println("[HTTP] Server Started");
 }
 
 // STA mode
@@ -397,14 +564,15 @@ void WebServer::startNormalMode()
     SPIFFS.begin(true);
     Serial.print("[WebServer] Running in STA mode. IP: ");
     Serial.println(WiFi.localIP());
+    String refineDeviceName = sanitizeName(config.device_name); // Refine name for mDNS
     // Start mDNS
-    if (!MDNS.begin(config.device_name.c_str()))
+    if (!MDNS.begin(refineDeviceName.c_str()))
     {
         Serial.println("[MDNS] Error setting up mDNS!");
     }
     else
     {
-        Serial.println("[MDNS] mDNS started: http://" + config.device_name + ".local");
+        Serial.println("[MDNS] mDNS started: http://" + refineDeviceName + ".local");
     }
 
     relayQueue = xQueueCreate(10, sizeof(RelayCommand));      // allow 10 pending commands
